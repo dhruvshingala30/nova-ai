@@ -214,7 +214,7 @@ The determinant is -7.
 - [x] Tool Calling
 - [x] Weather Tool
 - [x] Multiple City Support
-- [x] Code Execution Engine
+- [x] Python Code Interpreter
 - [x] Docker-based Code Execution
 
 ---
