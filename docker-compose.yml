@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  nova-ai:
+    build: .
+    container_name: nova_ai_agent
+    environment:
+      - OLLAMA_HOST=http://host.docker.internal:11434
+      - MODEL_NAME=qwen2.5:7b
+      - ENVIRONMENT=production
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    
+    # ── KEY ADDITIONS FOR INTERACTIVE TERMINAL ──
+    stdin_open: true   # Keeps STDIN open for typing inputs
+    tty: true          # Allocates a pseudo-terminal (TTY)
+    
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1G   # Expanded slightly to prevent OOM when running NumPy/SymPy
+    security_opt:
+      - no-new-privileges:true

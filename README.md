@@ -32,32 +32,38 @@ The agent automatically:
 
 ---
 
-### 🧮 Basic Calculator
+### 🐍 Code Execution Engine
 
-Perform arithmetic operations using a dedicated tool.
+Nova AI includes a Docker-powered Code Execution Engine that enables the LLM to generate and execute Python code safely,
 
-Supported operations:
+eliminating the need for dozens of manually implemented computational tools.
 
-- Addition
-- Subtraction
-- Multiplication
-- Division
-- Maximum
-- Minimum
-
-#### Examples - Basic Calculator Tool
+#### Examples - Code Execution Engine
 
 ```text
-25 + 89
+What is (245 × 97) / 13?
 ```
 
 ```text
-Multiply 12 and 18
+Find the factorial of 100.
 ```
 
 ```text
-Maximum of 15, 82, 33 and 50
+Generate the first 50 Fibonacci numbers.
 ```
+
+```text
+Calculate the determinant of this matrix:
+[[3, 5], [7, 2]]
+```
+
+The agent automatically:
+
+- Determines when computation is required
+- Generates Python code
+- Executes the code inside Docker
+- Observes the output
+- Returns a natural language response
 
 ---
 
@@ -72,18 +78,26 @@ Local LLM (Qwen / Ollama)
    ▼
 Reasoning
    │
-   ├── Needs Tool?
-   │       │
-   │      Yes
-   │       │
-   ▼       ▼
-Tool Execution
+   ├───────────────┐
+   │               │
+Needs Tool?        │
+   │               │
+  Yes             No
+   │               │
+   ▼               ▼
+Tool Selection   Final Answer
    │
-   ▼
-Observation
-   │
-   ▼
-Final Answer
+   ├───────────────┐
+   │               │
+Weather API   Python Interpreter
+   │               │
+   └───────┬───────┘
+           │
+           ▼
+      Observation
+           │
+           ▼
+      Final Answer
 ```
 
 The LLM is responsible for:
@@ -102,7 +116,7 @@ The LLM is responsible for:
 - Ollama
 - Qwen 2.5
 - Weather API
-- Docker (preparing for future execution environment)
+- Docker Sandbox
 
 ---
 
@@ -113,10 +127,10 @@ nova-ai/
 ├── app/
 │   ├── agent.py
 │   ├── config.py
-│   └── models.py
+│   ├── models.py
 │   ├── prompts.py
 │   ├── tools.py
-│   └── utils.py
+│   ├── utils.py
 │   └── ...
 │
 ├── classes/
@@ -184,10 +198,11 @@ The current weather in Ahmedabad is 31°C with light rain.
 
 ```text
 You:
-Maximum of 25, 78, 11 and 45
+What is the determinant of
+[[2,5],[3,4]] ?
 
 Nova AI:
-The maximum number is 78.
+The determinant is -7.
 ```
 
 ---
@@ -198,34 +213,23 @@ The maximum number is 78.
 
 - [x] Tool Calling
 - [x] Weather Tool
-- [x] Basic Calculator
 - [x] Multiple City Support
-- [x] Multiple Number Support
+- [x] Code Execution Engine
+- [x] Docker-based Code Execution
 
 ---
 
 ### 🚧 Version 0.2 (Coming Soon)
 
-#### Code Interpreter
+- Memory
+- RAG
 
-A major upgrade that enables Nova AI to:
-
-- Generate Python code automatically
-- Execute code safely inside Docker
-- Solve complex mathematical problems
-- Analyze datasets
-- Create graphs
-- Work with CSV and Excel files
-- Eliminate the need for many manually written tools
-
-This update moves Nova AI from using predefined tools toward autonomous problem solving.
+This update enables Nova AI to remember users over time and retrieve relevant information from external knowledge bases, making responses more personalized, context-aware, and factually grounded.
 
 ---
 
 ### Future Vision
 
-- Memory
-- RAG
 - Web Search
 - Image Understanding
 - File Upload

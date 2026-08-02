@@ -1,20 +1,15 @@
 from ollama import Client
 
 from app import prompts
-from app.config import MAX_HISTORY, MODEL_NAME, STEP_ICONS
+from app.config import MAX_HISTORY, MODEL_NAME, OLLAMA_HOST, STEP_ICONS
 from app.models import OutputFormat
 from app.tools import AVAILABLE_TOOLS
 from app.utils import create_observation, print_step
-from classes.calculator import Calculator
-
-NORMALIZERS = {
-    "basic_calculator": Calculator.normalize_calculator, 
-}
 
 
 class NovaAI:
     def __init__(self) -> None:
-        self.client = Client()
+        self.client = Client(host=OLLAMA_HOST)
         self.model = MODEL_NAME
 
         self.system_prompt = prompts.SYSTEM_PROMPT.replace(
@@ -85,10 +80,6 @@ class NovaAI:
 
         if not isinstance(tool_input, dict):
             raise TypeError(f"Tool input for '{tool_name}' must be a JSON object")
-
-        normalizer = NORMALIZERS.get(tool_name)
-        if normalizer:
-            tool_input = normalizer(tool_input)
 
         function = tool["function"]
         return function(**tool_input)

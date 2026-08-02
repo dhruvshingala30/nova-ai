@@ -1,8 +1,8 @@
-.venv/
 .env
+.env.*
+!.env.example
+
+.venv/
 __pycache__/
 *.pyc
 .DS_Store
-.dockerignore
-docker-compose.yml
-dockerfile

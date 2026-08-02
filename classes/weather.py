@@ -1,5 +1,7 @@
 import requests
 
+from app.config import TIME_OUT
+
 
 class Weather:
     @staticmethod
@@ -19,7 +21,7 @@ class Weather:
 
                 response = requests.get(
                     f"https://wttr.in/{city_name}?format=%C+%t+%w+%p+%h",
-                    timeout=10,
+                    timeout=TIME_OUT,
                 )
                 response.raise_for_status()
 
