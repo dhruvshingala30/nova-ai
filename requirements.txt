@@ -5,3 +5,4 @@ numpy
 pydantic
 anyio
 httpx
+tavily-python
