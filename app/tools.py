@@ -12,7 +12,7 @@ from classes.web_search import WebSearch, WebSearchInput
 # Central registry mapping string identifiers to tool metadata and handler methods
 AVAILABLE_TOOLS = {
     "get_weather": {
-        "function": Weather.get_weather,
+        "function": Weather().get_weather,
         "schema": WeatherInput,
         "description": "Returns the current weather of cities provided by the user.",
         "parameters": {"cities": "list[str]"},

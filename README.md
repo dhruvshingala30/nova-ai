@@ -1,6 +1,6 @@
 # 🚀 Nova AI
 
-> A modular Agentic AI framework that reasons, selects tools, executes code safely, and retrieves real-time information using local LLMs.
+> A modular Agentic AI framework that reasons, remembers, selects tools, executes code safely, and retrieves real-time information using local LLMs.
 
 Nova AI is an extensible AI Agent built with Python and local LLMs. Instead of relying only on language generation, Nova AI can reason about a user's request, decide whether external tools are required, execute them, observe the results, and generate accurate, grounded responses.
 
@@ -61,6 +61,35 @@ The agent automatically:
 
 ---
 
+### 🧠 Persistent Memory
+
+Nova AI now remembers previous conversations using SQLite, allowing it to retain important information across sessions.
+
+Instead of treating every interaction as brand new, the agent can recall previously stored facts whenever they are relevant.
+
+#### Examples - Persistant Memory
+
+```text
+Remember that my favorite programming language is Python.
+```
+
+```text
+What's my favorite programming language?
+```
+
+```text
+Remember that I'm preparing for AI Engineer interviews.
+```
+
+The agent automatically:
+
+- Extracts important long-term information
+- Stores it in a SQLite database
+- Retrieves relevant memories when needed
+- Uses them to produce personalized responses
+
+---
+
 ### 🐍 Code Execution Engine
 
 Nova AI includes a Docker-powered Code Execution Engine that enables the LLM to generate and execute Python code safely, eliminating the need for dozens of manually implemented computational tools.
@@ -111,19 +140,19 @@ The agent automatically:
           ▼
       Tool Router
           │
- ┌────────┼────────────┐
- │        │            │
- ▼        ▼            ▼
-Weather  Web      Code Execution
- API    Search       Engine
+ ┌────────┼──────────────┬─────────────┐
+ │        │              │             │
+ ▼        ▼              ▼             ▼
+Weather  Web      Code Execution   SQLite
+ API    Search       Engine        Memory
                      (Docker)
- │        │            │
- └────────┴──────┬─────┘
-                 ▼
-            Observation
-                 │
-                 ▼
-            Final Answer
+ │        │              │             │
+ └────────┴──────────────┴──────┬──────┘
+                                ▼
+                          Observation
+                                │
+                                ▼
+                          Final Answer
 ```
 
 The LLM is responsible for:
@@ -142,6 +171,7 @@ The LLM is responsible for:
 - Ollama
 - Qwen 2.5
 - Docker
+- SQLite
 - Tavily API
 - wttr.in API
 - Pydantic
@@ -164,6 +194,7 @@ nova-ai/
 │
 ├── classes/
 │   ├── code_interpreter.py
+│   ├── memory.py
 │   ├── weather.py
 │   ├── web_search.py
 │   └── ...
@@ -259,6 +290,24 @@ The determinant is -7.
 
 ---
 
+### Memory
+
+```text
+You:
+Remember that my favorite IDE is VS Code.
+
+Nova AI:
+Got it! I'll remember that your favorite IDE is VS Code.
+
+You:
+What's my favorite IDE?
+
+Nova AI:
+Your favorite IDE is VS Code.
+```
+
+---
+
 ## 🚀 Development Roadmap
 
 ### ✅ Phase 1: Foundation & Tools (Complete)
@@ -274,14 +323,16 @@ Nova AI can already reason about user requests, choose the appropriate tool, exe
 
 ---
 
-### 🚧 Phase 2: Memory & Data Ingestion (Current)
+### 🚧 Phase 2: Memory & Data Ingestion (In Progress)
 
-- [ ] SQLite Persistent Memory
+- [x] SQLite Persistent Memory
 - [ ] Shared File Workspace & Data Analysis
 - [ ] PDF Parsing
 - [ ] Local RAG Engine
 
-This phase enables Nova AI to remember previous interactions, analyze user-provided files, and retrieve relevant knowledge from local documents.
+Nova AI now supports persistent memory through SQLite, enabling personalized conversations across sessions.
+
+The remaining goals of this phase focus on enabling file analysis and Retrieval-Augmented Generation (RAG) using local documents.
 
 ---
 
@@ -303,7 +354,7 @@ Rather than relying heavily on agent frameworks, Nova AI implements reasoning, t
 
 The long-term vision is to build an AI system capable of:
 
-- Remembering previous conversations
+- ✅ Remembering previous conversations
 - Understanding documents and images
 - Executing code safely
 - Retrieving knowledge from local and online sources

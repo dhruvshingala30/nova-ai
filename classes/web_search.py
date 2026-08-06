@@ -7,10 +7,11 @@ sports schedules, and current events context for the LLM.
 
 import os
 
+from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from tavily import TavilyClient
 
-
+load_dotenv()
 class WebSearchInput(BaseModel):
     """Pydantic validation schema for search query strings."""
 

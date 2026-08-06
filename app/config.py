@@ -28,6 +28,9 @@ TIME_OUT = 10
 # -------------------------------
 # Application UI & Output Formatting
 # -------------------------------
+# Welcome message displayed upon entry
+WELCOME_TEXT = "🤖 Welcome to NovaAI"
+
 # Commands that trigger application shutdown
 EXIT_COMMANDS = {"exit", "quit", "bye"}
 
@@ -35,7 +38,7 @@ EXIT_COMMANDS = {"exit", "quit", "bye"}
 SEPARATOR = "=" * 100
 
 # Goodbye message displayed upon exit
-END_TEXT = "\n  BYE !!!  \n"
+END_TEXT = "\n  🤖 BYE !!!👋👋  \n"
 
 # Emojis/Icons mapped to each step in the ReAct execution protocol
 STEP_ICONS = {

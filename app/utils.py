@@ -7,8 +7,11 @@ and application exit texts.
 
 import json
 
-from app.config import END_TEXT, SEPARATOR, STEP_ICONS
+from app.config import END_TEXT, SEPARATOR, STEP_ICONS, WELCOME_TEXT
 
+
+def welcome():
+    print(WELCOME_TEXT)
 
 def print_separator():
     """Prints a visual separator line in the terminal console."""

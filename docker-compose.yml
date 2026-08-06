@@ -9,6 +9,9 @@ services:
       - MODEL_NAME=qwen2.5:7b
       - ENVIRONMENT=production
       - TAVILY_API_KEY=${TAVILY_API_KEY}
+    # volumes:
+    #   # Mount local directory to container so SQLite database persists across container updates
+    #   - .:/app   # Persists nova_memory.db and local workspace files
     extra_hosts:
       - "host.docker.internal:host-gateway"
     
@@ -20,6 +23,6 @@ services:
       resources:
         limits:
           cpus: '2.0'
-          memory: 1G   # Expanded slightly to prevent OOM when running NumPy/SymPy
+          memory: 2G   # Increased from 1G for SQLite + Pandas + SymPy/NumPy
     security_opt:
       - no-new-privileges:true

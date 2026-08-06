@@ -7,33 +7,44 @@ read-eval-print loop (REPL) in the terminal for user interactions.
 
 from app.agent import NovaAI
 from app.config import EXIT_COMMANDS
-from app.utils import goodbye, print_separator
+from app.utils import goodbye, print_separator, welcome
 
 
 def main():
     """
-    Main loop for interacting with the NovaAI agent.
+    Main loop for interacting with NovaAI.
 
-    Continuously listens for user input in the CLI, checks if the query matches
-    exit commands, and triggers the agentic execution loop (`agent.run`).
+    Creates a new agent instance with lazy session creation (title auto-generated
+    on prompt #1) and processes continuous user inputs.
     """
     # Initialize the core NovaAI agent engine
     agent = NovaAI()
 
     print_separator()
+    welcome()
+    print_separator()
 
     while True:
-        # Accept query input from user
-        user_query = input("You: ")
+        try:
+            # Accept query input from user
+            user_query = input("👉 ")
 
-        # Check if user wants to exit the application
-        if user_query.strip().lower() in EXIT_COMMANDS:
+            # Check for empty input
+            if not user_query.strip():
+                continue
+            
+            # Check if user wants to exit the application
+            if user_query.strip().lower() in EXIT_COMMANDS:
+                goodbye()
+                break
+
+            # Execute the agentic reasoning and tool execution loop
+            agent.run(user_query)
+            print_separator()
+
+        except (KeyboardInterrupt, EOFError):
             goodbye()
             break
-
-        # Execute the agentic reasoning and tool execution loop
-        agent.run(user_query)
-        print_separator()
 
 
 if __name__ == "__main__":
