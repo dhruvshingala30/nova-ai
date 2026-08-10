@@ -5,9 +5,9 @@ This module initializes the NovaAI agent instance and maintains an interactive
 read-eval-print loop (REPL) in the terminal for user interactions.
 """
 
-from app.agent import NovaAI
-from app.config import EXIT_COMMANDS
-from app.utils import goodbye, print_separator, welcome
+from agent import NovaAI
+from config import EXIT_COMMANDS
+from utils import goodbye, print_separator, welcome
 
 
 def main():

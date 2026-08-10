@@ -5,13 +5,17 @@ Provides database persistence for chat history across terminal restarts.
 
 import re
 import sqlite3
+from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+DEFAULT_DB_PATH = PROJECT_ROOT / "data" / "nova_memory.db"
 
 class SQLiteMemory:
     """SQLite database interface for persisting conversation history and session logs."""
 
-    def __init__(self, db_path: str = "nova_memory.db"):
-        self.db_path = db_path
+    def __init__(self, db_path: str | Path = DEFAULT_DB_PATH):
+        self.db_path = Path(db_path)
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_db()
 
     def _get_connection(self) -> sqlite3.Connection:

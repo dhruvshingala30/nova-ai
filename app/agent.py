@@ -7,15 +7,14 @@ sanitizes history, and orchestrates tool execution.
 import re
 from datetime import datetime
 
+from config import MAX_HISTORY, MODEL_NAME, OLLAMA_HOST, STEP_ICONS
+from core.memory import SQLiteMemory
+from models import OutputFormat
 from ollama import Client
+from prompts import SYSTEM_PROMPT
 from pydantic import ValidationError
-
-from app import prompts
-from app.config import MAX_HISTORY, MODEL_NAME, OLLAMA_HOST, STEP_ICONS
-from app.models import OutputFormat
-from app.tools import AVAILABLE_TOOLS
-from app.utils import create_observation, print_step
-from classes.memory import SQLiteMemory
+from tools import AVAILABLE_TOOLS
+from utils import create_observation, print_step
 
 
 class NovaAI:
@@ -30,7 +29,7 @@ class NovaAI:
         current_date = datetime.now().strftime("%A, %B %d, %Y")  # noqa: DTZ005
         date_context = f"\nCURRENT SYSTEM DATE AND TIME: TODAY is {current_date}.\n"
 
-        self.system_prompt = date_context + prompts.SYSTEM_PROMPT.replace(
+        self.system_prompt = date_context + SYSTEM_PROMPT.replace(
             "{{AVAILABLE_TOOLS}}", self._generate_tools_prompt()
         )
 
@@ -109,16 +108,37 @@ class NovaAI:
         messages = list(self.message_history)
 
         if len(messages) > 1 and messages[-1]["role"] == "user":
-            directive = {
-                "role": "system",
-                "content": (
-                    "[RUNTIME MANDATE]:\n"
-                    "1. If the user query asks for current weather or temperature (e.g. 'weather there', 'weather in Paris'), "
-                    "you MUST issue a `get_weather` TOOL step now. Do NOT output ANSWER without executing a tool first.\n"
-                    "2. ALWAYS use `get_weather` for city weather/temperature checks, NEVER `search_web`."
-                ),
-            }
-            messages.insert(-1, directive)
+            user_text = messages[-1]["content"].lower()
+
+            # 1. Workspace file check directive
+            if any(
+                kw in user_text
+                for kw in ["files", "workspace", "csv", "inspect", "directory"]
+            ):
+                directive = {
+                    "role": "system",
+                    "content": (
+                        "[RUNTIME MANDATE]: The user is asking about workspace files or datasets. "
+                        "You MUST issue a `STEP: TOOL` using `list_workspace_files` or `inspect_csv_schema` right now. "
+                        "Do NOT output STEP: EXPLANATION or STEP: ANSWER."
+                    ),
+                }
+                messages.insert(-1, directive)
+
+            # 2. Weather check directive
+            elif any(
+                kw in user_text 
+                for kw in ["weather", "temperature", "rain", "climate", "hot", "cold", "forecast", 
+                           "overcast", "sunny", "snow", "windy", "humidity", "storm"]
+            ):
+                directive = {
+                    "role": "system",
+                    "content": (
+                        "[RUNTIME MANDATE]: You MUST issue a `get_weather` TOOL step now. "
+                        "Do NOT issue a 'search_web' TOOL AND Do NOT output ANSWER without executing a 'get_weather' tool first."
+                    ),
+                }
+                messages.insert(-1, directive)
         return messages
 
     def execute_tool(self, tool_name: str, tool_input: dict) -> dict:
@@ -190,7 +210,7 @@ class NovaAI:
                 model_name=self.model,
                 prompt=user_query,
             )
-            print(f"  New Session Title Generated: '{self.session_id}'")
+            print(f"📝 New Session Title Generated: '{self.session_id}'")
 
         self.add_message(role="user", content=user_query)
 
@@ -212,11 +232,20 @@ class NovaAI:
                     )
                     continue
 
-                tool_output = self.execute_tool(tool_name, tool_input)
-                self.observe(tool_name, tool_input, tool_output)
                 print_step(
-                    parsed_result.STEP, parsed_result.CONTENT, parsed_result.TOOL
+                    parsed_result.STEP, 
+                    parsed_result.CONTENT or "", 
+                    parsed_result.TOOL
                 )
+                
+                tool_output = self.execute_tool(tool_name, tool_input)
+
+                # PRINT INSTANT DEBUG LOG IF TOOL EXECUTION FAILS
+                if isinstance(tool_output, dict) and tool_output.get("success") is False:
+                    print(f"❌ [TOOL EXECUTION ERROR]: {tool_output.get('error')}")
+
+                self.observe(tool_name, tool_input, tool_output)
+
 
             elif parsed_result.STEP in STEP_ICONS:
                 print_step(parsed_result.STEP, parsed_result.CONTENT or "", None)

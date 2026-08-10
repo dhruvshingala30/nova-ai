@@ -6,4 +6,6 @@
 __pycache__/
 *.pyc
 .DS_Store
-nova_memory.db
+
+data/
+nova_workspace/
