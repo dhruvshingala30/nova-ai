@@ -5,17 +5,8 @@ Queries live weather metrics for requested cities via the wttr.in weather API.
 """
 
 import requests
-from pydantic import BaseModel, Field
 
 from app.config import TIME_OUT
-
-
-class WeatherInput(BaseModel):
-    """Pydantic input schema for weather city parameters."""
-
-    cities: list[str] = Field(
-        description="A list of city names to fetch weather for. Correct any typos in city names first."
-    )
 
 
 class Weather:

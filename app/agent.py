@@ -192,9 +192,9 @@ class NovaAI:
 
         # Inject an unfulfilled subtask check inside the observation prompt
         subtask_reminder = (
-            "\n\n[SYSTEM CHECK]: Inspect the initial user prompt for this turn. "
-            "Are there any remaining unfulfilled questions or subtasks (e.g. London weather, additional calculations)? "
-            "If YES, your NEXT response MUST be a `TOOL` step for that subtask. Do NOT output 'ANSWER' until all subtasks are complete."
+            "\n\n[SYSTEM CHECK]: Review the user's query. If the observation above provides "
+            "all the information requested by the user, your NEXT step MUST be `STEP: ANSWER`. "
+            "Do NOT trigger additional tools unless explicitly requested by the prompt."
         )
 
         self.add_message(

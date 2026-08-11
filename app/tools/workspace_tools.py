@@ -1,30 +1,22 @@
 import sys
 from pathlib import Path
 
+from pypdf import PdfReader
+
 # Add project root (nova-ai/) to Python path dynamically
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 import pandas as pd
-from pydantic import BaseModel, Field
 
 from app.core.workspace_manager import workspace
+from app.models import InspectCSVInput, InspectPDFInput, ListFilesInput
 
 
-# ------------------------------------------------------------------
+# ----------------------------
 # Tool 1: List Workspace Files
-# ------------------------------------------------------------------
-class ListFilesInput(BaseModel):
-    subfolder: str | None = Field(
-        default="",
-        description="Optional relative subfolder within workspace (e.g., 'data' or 'reports'). Leave empty for root.",
-    )
-    pattern: str | None = Field(
-        default="*",
-        description="Optional glob pattern to filter files, e.g., '*.csv' or '*.json'.",
-    )
-
+# ----------------------------
 def list_workspace_files(
         params: ListFilesInput | None = None,
         subfolder: str | None = None,
@@ -65,22 +57,9 @@ def list_workspace_files(
         return {"status": "error", "message": f"Failed to list files: {str(e)}"}  # noqa: RUF010
 
 
-# ------------------------------------------------------------------
+# ---------------------------------
 # Tool 2: Inspect CSV Schema & Head
-# ------------------------------------------------------------------
-class InspectCSVInput(BaseModel):
-    file_path: str = Field(
-        default=...,
-        description="Relative path to the CSV file inside the workspace (e.g., 'sales_2025.csv').",
-    )
-    sample_rows: int = Field(
-        default=5,
-        ge=1,
-        le=20,
-        description="Number of sample rows to return for preview.",
-    )
-
-
+# ---------------------------------
 def inspect_csv_schema(
         params: InspectCSVInput | None = None,
         file_path : str = "",
@@ -130,6 +109,94 @@ def inspect_csv_schema(
         return {"status": "error", "message": str(pe)}
     except Exception as e:  # noqa: BLE001
         return {"status": "error", "message": f"Failed to inspect CSV: {str(e)}"}  # noqa: RUF010
+
+
+# --------------------------
+# Tool 3: Inspect PDF Schema
+# --------------------------
+def inspect_pdf_schema(
+        params: InspectPDFInput | None = None,
+        file_path: str = "",
+        max_pages_to_sample: int = 2,
+):
+    """
+    Inspects a PDF document in `./nova_workspace` to retrieve total page count,
+    metadata, and sample text from the initial pages.
+    """
+    # 1. Parameter Normalization (Handles both direct kwargs and Pydantic objects)
+    if params is None:
+        params = InspectPDFInput(
+            file_path=file_path,
+            max_pages_to_sample=max_pages_to_sample
+        )
+
+    try:
+        # 2. Path Security Check
+        safe_file_path = workspace.resolve_safe_path(params.file_path)
+        if not safe_file_path.exists():
+            return {
+                "status": "error",
+                "message": f"File '{params.file_path}' not found in workspace.",
+            }
+        if safe_file_path.suffix.lower() != '.pdf':
+            return {
+                "status": "error",
+                "message": f"File '{params.file_path}' is not a valid PDF file."
+            }
+
+        # 3. Read PDF with pypdf.PdfReader
+        reader = PdfReader(safe_file_path)
+        total_pages = len(reader.pages)
+
+        # Extract basic metadata
+        meta = reader.metadata
+        metadata_summary = {}
+        if meta:
+            metadata_summary = {
+                "title": meta.title or "Unknown",
+                "author": meta.author or "Unknown",
+                "creator": meta.creator or "Unknown",
+            }
+
+        # Extract sample text from initial pages
+        pages_to_extract = min(total_pages, params.max_pages_to_sample)
+        sample_pages = []
+        for page_num in range(pages_to_extract):
+            page = reader.pages[page_num]
+            extracted_text = page.extract_text() or "[No readable text found.]"
+
+            # Clean up excessive whitespace for scannability
+            cleaned_text = " ".join(extracted_text.split())
+
+            # Limit sample snippet length per page
+            snippet = (
+                cleaned_text[:400] + '...'
+                if len(cleaned_text) > 400
+                else cleaned_text
+            )
+
+            sample_pages.append(
+                {
+                    "page_number": page_num + 1,
+                    "character_count": len(extracted_text),
+                    "text_sample": snippet,
+                }
+            )
+
+        return {
+            "status": "success",
+            "file_name": safe_file_path.name,
+            "total_pages": total_pages,
+            "metadata": metadata_summary,
+            "sample_pages": sample_pages,
+        }
+    
+    except Exception as e:  # noqa: BLE001
+        return {
+            "status": "error",
+            "message": f"Failed to inspect pdf '{params.file_path}': {str(e)}"  # noqa: RUF010
+        }
+            
 
 
 if __name__ == "__main__":

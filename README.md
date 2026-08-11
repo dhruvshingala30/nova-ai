@@ -159,6 +159,45 @@ After inspecting the dataset, Nova AI can use the Code Execution Engine to perfo
 
 ---
 
+### 📄 PDF Inspection & Parsing
+
+Nova AI can inspect PDF files stored inside the shared workspace and extract useful document-level information before the RAG layer is introduced.
+
+The `inspect_pdf_schema` tool can inspect a PDF and provide the LLM with:
+
+- Total page count
+- PDF metadata
+- Document title
+- Author information
+- Creator information
+- Sample text extracted from selected pages
+
+This provides Nova AI with structured information about a PDF and establishes the document-processing foundation required for the upcoming Local RAG Engine.
+
+#### Example
+
+```text
+You:
+Inspect Trading in the Zone by Mark Douglas.pdf
+
+Nova AI:
+The file 'Trading in the Zone by Mark Douglas.pdf' contains the following details:
+
+- Total Pages: 143
+- Metadata:
+  - Title: Trading in the Zone
+  - Author: MaVeRiCk
+  - Creator: calibre (5.17.0)
+- Sample Text from Page 1:
+  TRADING IN THE ZONE
+- Sample Text from Page 2:
+  MASTER THE MARKET WITH CONFIDENCE, DISCIPLINE AND A WINNING ATTITUDE...
+```
+
+The current PDF functionality focuses on document inspection and text extraction. Semantic retrieval and question answering over the document will be introduced as part of the upcoming Local RAG Engine.
+
+---
+
 ### 🐍 Code Execution Engine
 
 Nova AI includes a Docker-powered Code Execution Engine that enables the LLM to generate and execute Python code inside an isolated sandbox.

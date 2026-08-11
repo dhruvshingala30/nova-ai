@@ -11,13 +11,20 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.tools.code_interpreter import CodeInterpreter, CodeInterpreterInput
-from app.tools.weather import Weather, WeatherInput
-from app.tools.web_search import WebSearch, WebSearchInput
-from app.tools.workspace_tools import (
+from app.models import (
+    CodeInterpreterInput,
     InspectCSVInput,
+    InspectPDFInput,
     ListFilesInput,
+    WeatherInput,
+    WebSearchInput,
+)
+from app.tools.code_interpreter import CodeInterpreter
+from app.tools.weather import Weather
+from app.tools.web_search import WebSearch
+from app.tools.workspace_tools import (
     inspect_csv_schema,
+    inspect_pdf_schema,
     list_workspace_files,
 )
 
@@ -46,7 +53,7 @@ AVAILABLE_TOOLS = {
         "schema": ListFilesInput,
         "description": "Lists files, sizes, and relative paths in the workspace.",
         "parameters": {
-            "subfolder": "str (optional)", 
+            "subfolder": "str (optional)",
             "pattern": "str (optional)",
         },
     },
@@ -55,8 +62,18 @@ AVAILABLE_TOOLS = {
         "schema": InspectCSVInput,
         "description": "Inspects a CSV file's structure, column types, shape, and sample data without loading the whole file into LLM memory.",
         "parameters": {
-            "file_path": "str", 
-            "sample_rows": "int (optional)",
+            "file_path": "str",
+            "sample_rows": "int (optional, default=5)",
+        },
+    },
+    "inspect_pdf_schema": {
+        "function": inspect_pdf_schema,
+        "schema": InspectPDFInput,
+        "description": "Inspects a PDF document in `./nova_workspace` to retrieve total pages, "
+                        "document metadata, and sample text content from initial pages.",
+        "parameters": {
+            "file_path": "str",
+            "max_pages_to_sample": "int (optional, default=2)",
         },
     },
 }
