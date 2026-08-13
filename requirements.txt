@@ -11,3 +11,7 @@ matplotlib
 pandas
 docker
 pypdf
+pdfplumber
+langchain-text-splitters
+chromadb
+sentence-transformers

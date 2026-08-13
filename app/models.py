@@ -116,3 +116,18 @@ class InspectPDFInput(BaseModel):
         le=5,
         description="Number of sample pages to return for preview",
     )
+
+# ----------------------------------------------------
+# Pydantic Schema for Search Knowledge Base Tool Input
+# ----------------------------------------------------
+class SearchKnowledgeBaseInput(BaseModel):
+    query: str = Field(
+        default=...,
+        description="he natural language search query or concept to look up in workspace documents.",
+    )
+    n_results: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Number of relevant chunks to retrieve (default is 3).",
+    )

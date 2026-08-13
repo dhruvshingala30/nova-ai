@@ -139,6 +139,22 @@ class NovaAI:
                     ),
                 }
                 messages.insert(-1, directive)
+
+            # 3. Document / Knowledge base search directive
+            elif any(
+                kw in user_text
+                for kw in ["pdf", "book", "document", "trading in the zone", "chapter", 
+                           "knowledge base", "search docs", "author", "mark douglas",]
+            ):
+                directive = {
+                    "role": "system",
+                    "content": (
+                        "[RUNTIME MANDATE]: The user is asking about ingested documents, books, or workspace literature. "
+                        "You MUST issue a `STEP: TOOL` using `search_knowledge_base` with a clear search query now. "
+                        "Do NOT output STEP: EXPLANATION or STEP: ANSWER without searching the knowledge base first."
+                    ),
+                }
+                messages.insert(-1, directive)
         return messages
 
     def execute_tool(self, tool_name: str, tool_input: dict) -> dict:

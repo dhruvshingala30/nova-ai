@@ -1,6 +1,6 @@
 # 🚀 Nova AI
 
-> A modular Agentic AI framework that reasons, remembers, selects tools, executes code safely, and retrieves real-time information using local LLMs.
+> A modular Agentic AI framework that reasons, remembers, retrieves knowledge, selects tools, executes code safely, and accesses real-time information using local LLMs.
 
 Nova AI is an extensible AI Agent built with Python and local LLMs. Instead of relying only on language generation, Nova AI can reason about a user's request, decide whether external tools are required, execute them, observe the results, and generate accurate, grounded responses.
 
@@ -103,6 +103,8 @@ The workspace system provides:
 - Protection against path traversal
 - Workspace file discovery and metadata inspection
 - CSV and TSV schema inspection
+- PDF content inspection
+- Integration with the Local RAG Engine for semantic document retrieval
 - Integration with the Python Code Execution Engine for data analysis
 
 #### Workspace File Discovery
@@ -161,9 +163,9 @@ After inspecting the dataset, Nova AI can use the Code Execution Engine to perfo
 
 ### 📄 PDF Inspection & Parsing
 
-Nova AI can inspect PDF files stored inside the shared workspace and extract useful document-level information before the RAG layer is introduced.
+Nova AI can inspect PDF files stored inside the shared workspace and extract useful document-level information.
 
-The `inspect_pdf_schema` tool can inspect a PDF and provide the LLM with:
+The `inspect_pdf_schema` tool provides the LLM with structured information about a PDF, including:
 
 - Total page count
 - PDF metadata
@@ -172,16 +174,16 @@ The `inspect_pdf_schema` tool can inspect a PDF and provide the LLM with:
 - Creator information
 - Sample text extracted from selected pages
 
-This provides Nova AI with structured information about a PDF and establishes the document-processing foundation required for the upcoming Local RAG Engine.
+PDF inspection forms the document-processing layer of Nova AI, while the Local RAG Engine builds on this capability to index PDF content and retrieve relevant information semantically.
 
-#### Example
+#### Example - PDF Inspection
 
 ```text
 You:
 Inspect Trading in the Zone by Mark Douglas.pdf
 
 Nova AI:
-The file 'Trading in the Zone by Mark Douglas.pdf' contains the following details:
+The file 'Trading in the zone by Mark Douglas.pdf' contains the following details:
 
 - Total Pages: 143
 - Metadata:
@@ -194,7 +196,81 @@ The file 'Trading in the Zone by Mark Douglas.pdf' contains the following detail
   MASTER THE MARKET WITH CONFIDENCE, DISCIPLINE AND A WINNING ATTITUDE...
 ```
 
-The current PDF functionality focuses on document inspection and text extraction. Semantic retrieval and question answering over the document will be introduced as part of the upcoming Local RAG Engine.
+The PDF inspection feature handles document-level metadata and text extraction, while the Local RAG Engine handles semantic indexing and retrieval from processed PDF content.
+
+---
+
+### 🔎 Local RAG Engine
+
+Nova AI includes a local Retrieval-Augmented Generation (RAG) pipeline for querying indexed PDF documents.
+
+The RAG engine uses:
+
+- ChromaDB for persistent vector storage
+- Sentence Transformers for semantic embeddings
+- LangChain Text Splitters for document chunking
+- pdfplumber for PDF text extraction
+
+The `ingest_pdf.py` pipeline extracts text from PDF documents, splits the content into manageable chunks, generates embeddings, and stores the resulting vectors in a local ChromaDB collection.
+
+The `search_knowledge_base` tool performs semantic similarity search against the indexed knowledge base and provides the most relevant document context to the LLM.
+
+#### RAG Pipeline
+
+```text
+PDF Document
+     │
+     ▼
+pdfplumber
+     │
+     ▼
+Text Extraction
+     │
+     ▼
+LangChain Text Splitter
+     │
+     ▼
+Document Chunks
+     │
+     ▼
+Sentence Transformers
+     │
+     ▼
+Embeddings
+     │
+     ▼
+ChromaDB
+     │
+     ▼
+Vector Search
+     │
+     ▼
+Relevant Context
+     │
+     ▼
+Local LLM (Qwen)
+     │
+     ▼
+Grounded Answer
+```
+
+#### Example - RAG Response
+
+```text
+You:
+What does Mark Douglas say about market probabilities and risk?
+
+Nova AI:
+Mark Douglas emphasizes that trading requires a different mindset compared
+to other aspects of life where we typically rely on skills learned over time.
+He explains that traders must learn to think in terms of probabilities and
+be willing to surrender conventional skills they have acquired in their
+daily lives.
+```
+
+Nova AI retrieves relevant context from the locally indexed PDF before generating the answer.
+
+The RAG engine allows Nova AI to answer questions using information retrieved from locally indexed documents rather than relying solely on the LLM's pre-trained knowledge.
 
 ---
 
@@ -306,34 +382,31 @@ This allows the same execution engine to handle both general-purpose computation
                            │
                      Reason & Plan
                            │
-                  ┌────────┴────────┐
-                  │                 │
-             Needs Tool?        Final Answer
-                  │
-                  ▼
-              Tool Router
-                  │
-       ┌──────────┼───────────┬──────────────┐
-       │          │           │              │
-       ▼          ▼           ▼              ▼
-    Weather     Web      Workspace      SQLite
-      API      Search       Tools         Memory
-                            │
-                            ▼
-                       CSV / TSV
-                       Inspection
-                            │
-                            ▼
-                    Python Code Engine
-                            │
-                            ▼
-                    Docker Sandbox
-                            │
-                            ▼
-                       Observation
-                            │
-                            ▼
-                       Final Answer
+                           ▼
+                      Tool Router
+                           │
+       ┌───────────┬───────┼──────────┬───────────┐
+       │           │       │          │           │
+       ▼           ▼       ▼          ▼           ▼
+    Weather      Web    Memory    Knowledge   Workspace
+      API       Search   SQLite      Base       Tools
+                                      │           │
+                                      ▼           ▼
+                                   ChromaDB     CSV / PDF
+                                      │         Inspection
+                                      │           │
+                                      │           ▼
+                                      │     Code Execution
+                                      │           │
+                                      │           ▼
+                                      │     Docker Sandbox
+                                      │
+                                      ▼
+                                  Context
+                                      │
+                                      └──────────┐
+                                                 ▼
+                                          Final Answer
 ```
 
 The LLM is responsible for:
@@ -362,6 +435,13 @@ The LLM is responsible for:
 - wttr.in API
 - SQLite
 
+### Document Processing & RAG
+
+- pdfplumber
+- LangChain Text Splitters
+- Sentence Transformers
+- ChromaDB
+
 ### Execution & Data Analysis
 
 - Docker
@@ -387,6 +467,7 @@ nova-ai/
 │   ├── tools/
 │   │   ├── __init__.py
 │   │   ├── code_interpreter.py
+│   │   ├── knowledge_base_search.py
 │   │   ├── weather.py
 │   │   ├── web_search.py
 │   │   └── workspace_tools.py
@@ -399,9 +480,13 @@ nova-ai/
 │   └── utils.py
 │
 ├── data/
+│   ├── vector_db/
 │   └── nova_memory.db
 │
 ├── nova_workspace/
+│
+├── rag/
+│   └── ingest_pdf.py
 │
 ├── .dockerignore
 ├── .env.example
@@ -413,8 +498,9 @@ nova-ai/
 └── README.md
 ```
 
-> `nova_workspace` is created dynamically at runtime and is used as Nova AI's dedicated file workspace.
+> `nova_workspace/` is created dynamically at runtime and is used as Nova AI's shared file workspace.
 > `data/nova_memory.db` stores Nova AI's persistent SQLite memory.
+> `data/vector_db/` contains the local ChromaDB vector store used by Nova AI's RAG pipeline.
 
 ---
 
@@ -455,6 +541,8 @@ To obtain a Tavily API key:
 ```bash
 ollama pull qwen2.5:7b
 ```
+
+> **Note:** The first RAG query may download the configured Sentence Transformers embedding model from Hugging Face. Subsequent runs use the locally cached model.
 
 ### Run Nova AI
 
@@ -554,6 +642,44 @@ After inspecting the dataset, Nova AI can pass the relevant information to the C
 
 ---
 
+### PDF Inspection
+
+```text
+You:
+Inspect Trading in the Zone by Mark Douglas.pdf
+
+Nova AI:
+The file contains:
+
+- Total Pages: 143
+- Title: Trading in the Zone
+- Author: MaVeRiCk
+- Creator: calibre (5.17.0)
+- Sample text extracted from the document
+```
+
+The PDF inspection layer extracts document metadata and text that can subsequently be indexed by the RAG pipeline.
+
+---
+
+### Local RAG
+
+```text
+You:
+What does Mark Douglas say about market probabilities and risk?
+
+Nova AI:
+Mark Douglas emphasizes that trading requires a different mindset compared
+to other aspects of life where we typically rely on skills learned over time.
+He explains that traders must learn to think in terms of probabilities and
+be willing to surrender conventional skills they have acquired in their
+daily lives.
+```
+
+Nova AI retrieves relevant context from the locally indexed PDF before generating the answer.
+
+---
+
 ## 🚀 Development Roadmap
 
 ### ✅ Phase 1: Foundation & Tools (Complete)
@@ -569,18 +695,16 @@ Nova AI can reason about user requests, choose the appropriate tool, execute it,
 
 ---
 
-### 🚧 Phase 2: Memory & Data Ingestion (In Progress)
+### ✅ Phase 2: Memory & Data Ingestion (Complete)
 
 - [x] SQLite Persistent Memory
 - [x] Shared File Workspace & Data Analysis
-- [ ] PDF Parsing
-- [ ] Local RAG Engine
+- [x] PDF Parsing & Content Inspection
+- [x] Local RAG Engine
 
-Nova AI now supports persistent memory and can work with user-provided datasets through a dedicated file workspace.
+Nova AI can now maintain persistent memory, work with user-provided files, inspect datasets and PDFs, and retrieve relevant context from locally indexed documents.
 
-The workspace provides safe file handling, CSV/TSV inspection, and integration with the Docker-based Python execution engine for computational and data-analysis tasks.
-
-The remaining goals of this phase focus on PDF parsing and building a local Retrieval-Augmented Generation (RAG) engine.
+Phase 2 establishes the foundation for context-aware and knowledge-grounded interactions using persistent memory, structured file handling, PDF processing, vector embeddings, and local semantic retrieval.
 
 ---
 
@@ -604,11 +728,13 @@ The long-term vision is to build an AI system capable of:
 
 - Remembering previous conversations
 - Working with user-provided files
-- Understanding documents and images
+- Parsing and understanding documents
+- Retrieving knowledge from indexed documents
+- Understanding images
 - Executing code safely
 - Performing complex mathematical and scientific computations
 - Analyzing datasets and generating visualizations
-- Retrieving knowledge from local and online sources
+- Retrieving knowledge from local vector databases and online sources
 - Planning complex multi-step tasks
 - Collaborating with specialized agents
 - Continuously improving through reflection

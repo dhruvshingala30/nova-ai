@@ -14,6 +14,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
+# Upgrade pip before installing dependencies
+RUN pip install --no-cache-dir --upgrade pip
+
 # Copy and install requirements
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

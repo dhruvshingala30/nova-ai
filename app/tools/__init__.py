@@ -16,10 +16,12 @@ from app.models import (
     InspectCSVInput,
     InspectPDFInput,
     ListFilesInput,
+    SearchKnowledgeBaseInput,
     WeatherInput,
     WebSearchInput,
 )
 from app.tools.code_interpreter import CodeInterpreter
+from app.tools.knowledge_base_search import search_knowledge_base
 from app.tools.weather import Weather
 from app.tools.web_search import WebSearch
 from app.tools.workspace_tools import (
@@ -70,10 +72,30 @@ AVAILABLE_TOOLS = {
         "function": inspect_pdf_schema,
         "schema": InspectPDFInput,
         "description": "Inspects a PDF document in `./nova_workspace` to retrieve total pages, "
-                        "document metadata, and sample text content from initial pages.",
+        "document metadata, and sample text content from initial pages.",
         "parameters": {
             "file_path": "str",
             "max_pages_to_sample": "int (optional, default=2)",
+        },
+    },
+    "search_knowledge_base": {
+        "function": search_knowledge_base,
+        "schema": SearchKnowledgeBaseInput,
+        "description": (
+            "Semantically searches ingested PDF documents and workspace files in "
+            "ChromaDB for answers to user questions. Returns relevant text chunks "
+            "along with source file names and page numbers."
+        ),
+        "parameters": {
+            "query": {
+                "type": "string",
+                "description": "The search query or concept to look up in workspace documents.",
+            },
+            "n_results": {
+                "type": "integer(default=3)",
+                "description": "Number of relevant chunks to retrieve (default is 3).",
+            },
+            "required": ["query"]
         },
     },
 }
