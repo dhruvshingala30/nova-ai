@@ -1,6 +1,6 @@
 # 🚀 Nova AI
 
-> A modular Agentic AI framework that reasons, remembers, retrieves knowledge, selects tools, executes code safely, and accesses real-time information using local LLMs.
+> A modular Agentic AI framework that reasons, remembers, retrieves knowledge, analyzes data, executes code safely, and uses external tools through local LLMs.
 
 Nova AI is an extensible AI Agent built with Python and local LLMs. Instead of relying only on language generation, Nova AI can reason about a user's request, decide whether external tools are required, execute them, observe the results, and generate accurate, grounded responses.
 
@@ -161,6 +161,48 @@ After inspecting the dataset, Nova AI can use the Code Execution Engine to perfo
 
 ---
 
+### 👀 Workspace Auto-Ingestion
+
+Nova AI now includes a workspace file watcher that monitors the `nova_workspace` directory for newly added or modified files.
+
+The `WorkspaceWatcher` automatically detects workspace changes and can trigger the document ingestion pipeline without requiring manual ingestion commands for every new file.
+
+This creates a more seamless workflow:
+
+```text
+User Adds File
+      │
+      ▼
+nova_workspace/
+      │
+      ▼
+Workspace Watcher
+      │
+      ▼
+File Type Detection
+      │
+      ├── CSV / TSV
+      │       ↓
+      │   Data Analysis
+      │
+      └── PDF / Document
+              ↓
+          RAG Ingestion
+              │
+              ▼
+          Vector Database
+```
+
+The watcher allows the workspace to behave more like a continuously available knowledge and data environment rather than a static directory.
+
+The runtime logs confirm that workspace monitoring is active:
+
+```text
+[Workspace Watcher] Auto-ingestion active on: /app/nova_workspace
+```
+
+---
+
 ### 📄 PDF Inspection & Parsing
 
 Nova AI can inspect PDF files stored inside the shared workspace and extract useful document-level information.
@@ -215,43 +257,60 @@ The `ingest_pdf.py` pipeline extracts text from PDF documents, splits the conten
 
 The `search_knowledge_base` tool performs semantic similarity search against the indexed knowledge base and provides the most relevant document context to the LLM.
 
-#### RAG Pipeline
+The initial RAG implementation uses dense semantic retrieval with ChromaDB.
+This foundation has been extended with hybrid retrieval using BM25, RRF,
+and HyDE.
+
+---
+
+### 🔬 Advanced RAG Retrieval
+
+Nova AI's RAG architecture uses a hybrid retrieval pipeline that combines
+dense semantic retrieval, BM25 lexical search, Reciprocal Rank Fusion (RRF),
+and HyDE.
+
+The enhanced retrieval architecture combines:
+
+- Dense semantic retrieval using ChromaDB
+- BM25 lexical retrieval
+- Reciprocal Rank Fusion (RRF)
+- HyDE (Hypothetical Document Embeddings)
+
+The enhanced retrieval pipeline combines semantic similarity with
+keyword-based relevance, improving retrieval quality for both conceptual
+questions and queries containing specific terminology.
+
+The enhanced retrieval flow is:
 
 ```text
-PDF Document
-     │
-     ▼
-pdfplumber
-     │
-     ▼
-Text Extraction
-     │
-     ▼
-LangChain Text Splitter
-     │
-     ▼
-Document Chunks
-     │
-     ▼
-Sentence Transformers
-     │
-     ▼
-Embeddings
-     │
-     ▼
-ChromaDB
-     │
-     ▼
-Vector Search
-     │
-     ▼
-Relevant Context
-     │
-     ▼
-Local LLM (Qwen)
-     │
-     ▼
-Grounded Answer
+                          User Query
+                              │
+                    ┌─────────┴─────────┐
+                    │                   │
+                    ▼                   ▼
+                   HyDE            Original Query
+                    │                   │
+                    ▼                   ▼
+          Hypothetical Document        BM25
+                    │                   │
+                    ▼                   │
+             Dense Retrieval            │
+                    │                   │
+                 ChromaDB               │
+                    │                   │
+                    └─────────┬─────────┘
+                              ▼
+                    Reciprocal Rank Fusion
+                            (RRF)
+                              │
+                              ▼
+                        Ranked Context
+                              │
+                              ▼
+                          Local LLM
+                              │
+                              ▼
+                        Grounded Answer
 ```
 
 #### Example - RAG Response
@@ -372,41 +431,89 @@ This allows the same execution engine to handle both general-purpose computation
 
 ---
 
+#### Smart Execution Output
+
+Nova AI applies output controls to prevent large Python executions from overwhelming the LLM context.
+
+The Code Execution Engine can intelligently cap:
+
+- Excessive stdout output
+- Large DataFrame displays
+- Oversized tabular results
+- Unnecessary intermediate execution output
+
+This allows Nova AI to work with large datasets and verbose Python programs while keeping the information passed back to the LLM compact and useful.
+
+Instead of returning an entire dataset or thousands of printed lines, the execution layer provides a controlled representation of the result.
+
+---
+
 ## 🧠 How Nova AI Works
 
 ```text
-                         User
-                           │
-                           ▼
-                  Local LLM (Qwen)
-                           │
-                     Reason & Plan
-                           │
-                           ▼
-                      Tool Router
-                           │
-       ┌───────────┬───────┼──────────┬───────────┐
-       │           │       │          │           │
-       ▼           ▼       ▼          ▼           ▼
-    Weather      Web    Memory    Knowledge   Workspace
-      API       Search   SQLite      Base       Tools
-                                      │           │
-                                      ▼           ▼
-                                   ChromaDB     CSV / PDF
-                                      │         Inspection
-                                      │           │
-                                      │           ▼
-                                      │     Code Execution
-                                      │           │
-                                      │           ▼
-                                      │     Docker Sandbox
-                                      │
-                                      ▼
-                                  Context
-                                      │
-                                      └──────────┐
-                                                 ▼
-                                          Final Answer
+┌─────────────────────────────────────────────────────────────────────┐
+│                                 USER                                │
+└──────────────────────────────────┬──────────────────────────────────┘
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                           LOCAL LLM · QWEN                          │
+│                        Reason • Plan • Decide                       │
+└──────────────────────────────────┬──────────────────────────────────┘
+                                   │
+                                   ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                           TOOL ROUTER                               │
+└───────┬───────────┬───────────┬───────────┬───────────────┬─────────┘
+        │           │           │           │               │
+        ▼           ▼           ▼           ▼               ▼
+   ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌────────────┐ ┌─────────────┐
+   │ WEATHER │ │   WEB   │ │ MEMORY  │ │  WORKSPACE │ │ KNOWLEDGE   │
+   │   API   │ │ SEARCH  │ │ SQLite  │ │   TOOLS    │ │    BASE     │
+   └─────────┘ └─────────┘ └─────────┘ └─────┬──────┘ └──────┬──────┘
+                                             │               │
+                              ┌──────────────┴──────┐        │
+                              ▼                     ▼        ▼
+                         ┌─────────┐           ┌─────────┐ ┌──────────┐
+                         │ CSV/TSV │           │   PDF   │ │   HyDE   │
+                         │ Analysis│           │Parsing  │ │  Query   │
+                         └────┬────┘           └────┬────┘ │Expansion │
+                              │                     │      └────┬─────┘
+                              │                     │           │
+                              ▼                     ▼           ▼
+                         ┌─────────────────┐   ┌──────────────────────┐
+                         │ PYTHON CODE     │   │    HYBRID SEARCH     │
+                         │  INTERPRETER    │   │                      │
+                         │                 │   │ Dense + BM25 → RRF   │
+                         └────────┬────────┘   └──────────┬───────────┘
+                                  │                       │
+                                  ▼                       ▼
+                         ┌─────────────────┐       ┌─────────────┐
+                         │ DOCKER SANDBOX  │       │   RANKED    │
+                         │                 │       │   CONTEXT   │
+                         │ Math • Science  │       └──────┬──────┘
+                         │ Data • Charts   │              │
+                         └────────┬────────┘              │
+                                  │                       │
+                                  └───────────┬───────────┘
+                                              │
+                                              ▼
+                                ┌───────────────────────────┐
+                                │        OBSERVATION        │
+                                │   Tool Results + Context  │
+                                └─────────────┬─────────────┘
+                                                │
+                                                ▼
+                                ┌───────────────────────────┐
+                                │     LOCAL LLM · QWEN      │
+                                │    Reason • Synthesize    │
+                                │   Combine Tool Results    │
+                                └─────────────┬─────────────┘
+                                                │
+                                                ▼
+                                ┌───────────────────────────┐
+                                │         FINAL ANSWER      │
+                                └───────────────────────────┘
 ```
 
 The LLM is responsible for:
@@ -421,36 +528,103 @@ The LLM is responsible for:
 
 ## 🛠️ Tech Stack
 
-### Core
+### 🤖 AI & Agent Core
 
-- Python
 - Ollama
-- Qwen 2.5
 - Pydantic
-- Rich Logging
+- AnyIO
+- HTTPX
 
-### APIs & Services
+### 🌐 APIs & External Services
 
-- Tavily API
-- wttr.in API
+- Tavily Python SDK
+- Requests
+- python-dotenv
+
+### 🧠 Memory & Retrieval
+
 - SQLite
+- ChromaDB
+- Sentence Transformers
+- rank-bm25
 
-### Document Processing & RAG
+### 📄 Document Processing
 
+- pypdf
 - pdfplumber
 - LangChain Text Splitters
-- Sentence Transformers
-- ChromaDB
 
-### Execution & Data Analysis
+### 📊 Data Analysis & Visualization
 
-- Docker
 - Pandas
 - NumPy
 - Matplotlib
-- Seaborn
 - SymPy
-- SciPy
+
+### 🐳 Code Execution & Workspace
+
+- Docker
+- Watchdog
+
+### 🏗️ Architecture
+
+- Local LLM inference with Ollama
+- Tool Calling
+- Pydantic Input Validation
+- Persistent SQLite Memory
+- Local Vector Database
+- Hybrid Retrieval
+- HyDE
+- Reciprocal Rank Fusion (RRF)
+- Automatic Workspace File Monitoring
+- Docker-isolated Python Code Execution
+
+---
+
+## 🧩 Current Capabilities
+
+Nova AI currently provides:
+
+- 🌤️ Real-time weather information
+- 🌐 Web search
+- 🧠 Persistent SQLite memory
+- 📁 Shared workspace management
+- 👀 Automatic workspace file monitoring
+- 📊 CSV / TSV inspection and analysis
+- 📄 PDF inspection and parsing
+- 🔎 Local semantic RAG
+- 🔬 Hybrid RAG with Dense + BM25 retrieval
+- 🔀 Reciprocal Rank Fusion (RRF)
+- 🧠 HyDE query enhancement
+- 🧮 General-purpose mathematical problem solving through Python
+- 🐍 Dynamic Python code generation and execution
+- 🐳 Docker-isolated code execution
+- 📉 Smart execution-output capping
+- 📚 Local vector knowledge storage
+- 🔗 Multi-tool result synthesis
+- 🧠 Observation-driven final answer generation
+
+---
+
+## 🛡️ Reliability & Safety
+
+Nova AI is being designed with reliability and controlled execution as first-class concerns.
+
+Current safeguards include:
+
+- Docker-isolated Python execution
+- Workspace path traversal protection
+- Controlled Python execution output
+- DataFrame output capping
+- Structured tool inputs using Pydantic
+- Workspace monitoring and controlled ingestion
+
+Future reliability mechanisms include:
+
+- Automated agent evaluation
+- Human-in-the-loop approval for sensitive operations
+- Planning and reflection
+- Tool execution validation
 
 ---
 
@@ -461,8 +635,10 @@ nova-ai/
 ├── app/
 │   ├── core/
 │   │   ├── __init__.py
-│   │   ├── memory.py
-│   │   └── workspace_manager.py
+│   │   ├── hyde.py                 # HyDE query generation
+│   │   ├── memory.py               # Persistent SQLite memory
+│   │   ├── workspace_manager.py    # Workspace management
+│   │   └── workspace_watcher.py    # Automatic workspace monitoring
 │   │
 │   ├── tools/
 │   │   ├── __init__.py
@@ -548,6 +724,20 @@ ollama pull qwen2.5:7b
 
 ```bash
 python main.py
+```
+
+### Workspace
+
+Nova AI automatically creates and monitors the `nova_workspace/` directory.
+
+Place supported files inside this directory and the Workspace Watcher will detect changes and trigger the appropriate ingestion or inspection workflow.
+
+```text
+nova-ai/
+└── nova_workspace/
+    ├── data.csv
+    ├── report.pdf
+    └── ...
 ```
 
 ---
@@ -680,6 +870,45 @@ Nova AI retrieves relevant context from the locally indexed PDF before generatin
 
 ---
 
+### Hybrid RAG
+
+```text
+You:
+What does Mark Douglas say about market probabilities and risk?
+
+Nova AI:
+Mark Douglas emphasizes that trading requires a different mindset compared
+to other aspects of life where we typically rely on skills learned over time.
+He explains that traders must learn to think in terms of probabilities and
+be willing to surrender conventional skills they have acquired in their
+daily lives.
+```
+
+---
+
+### Workspace Auto-Ingestion
+
+```text
+[Workspace Watcher] Auto-ingestion active on: /app/nova_workspace
+```
+
+Once a supported file is added or modified inside the workspace, Nova AI can detect the change and make the updated content available to its workspace and knowledge workflows.
+
+---
+
+### Knowledge Retrieval
+
+```text
+You:
+According to the Mark Douglas book in my workspace, what is the failure rate percentage for traders?
+
+Nova AI:
+According to Mark Douglas in his book 'Trading in the Zone', approximately
+95% of futures traders lose all of their money within the first year of trading.
+```
+
+---
+
 ## 🚀 Development Roadmap
 
 ### ✅ Phase 1: Foundation & Tools (Complete)
@@ -695,26 +924,49 @@ Nova AI can reason about user requests, choose the appropriate tool, execute it,
 
 ---
 
-### ✅ Phase 2: Memory & Data Ingestion (Complete)
+### ✅ Phase 2: Memory, Data Ingestion & Retrieval (Complete)
 
 - [x] SQLite Persistent Memory
 - [x] Shared File Workspace & Data Analysis
 - [x] PDF Parsing & Content Inspection
 - [x] Local RAG Engine
+- [x] Workspace Auto-Ingestion
+- [x] Smart Python Execution Output Capping
+- [x] Hybrid Search (Dense + BM25)
+- [x] Reciprocal Rank Fusion (RRF)
+- [x] HyDE Retrieval Enhancement
 
-Nova AI can now maintain persistent memory, work with user-provided files, inspect datasets and PDFs, and retrieve relevant context from locally indexed documents.
+Nova AI now provides a complete local knowledge and data layer with
+persistent memory, automated workspace ingestion, PDF processing, data
+analysis, and advanced Retrieval-Augmented Generation. Its hybrid retrieval
+pipeline combines dense semantic search, BM25, Reciprocal Rank Fusion (RRF),
+and HyDE to improve the relevance of retrieved context.
 
-Phase 2 establishes the foundation for context-aware and knowledge-grounded interactions using persistent memory, structured file handling, PDF processing, vector embeddings, and local semantic retrieval.
+Phase 2 delivers a complete local knowledge and data layer for Nova AI,
+combining persistent memory, automated workspace ingestion, safe code
+execution, document processing, hybrid retrieval, and local knowledge
+grounding.
 
 ---
 
 ### 🔮 Phase 3: Autonomous Intelligence
 
+#### Agent Reasoning
+
 - [ ] ReAct Planning & Reflection Loop
+- [ ] Automated Evaluation Test Suite
+- [ ] Human-in-the-Loop Safeguards
+
+#### Advanced Capabilities
+
 - [ ] Vision / Image Understanding
 - [ ] Multi-Agent Collaboration Protocol
 
-The goal of this phase is to transform Nova AI from a tool-using assistant into an autonomous reasoning system capable of planning, self-correction, and collaborative problem solving.
+The goal of this phase is to evolve Nova AI from a tool-using assistant
+into an autonomous and reliable reasoning system capable of planning
+multi-step tasks, reflecting on its actions, evaluating its own performance,
+handling uncertainty with appropriate human oversight, understanding
+multimodal inputs, and collaborating with specialized agents.
 
 ---
 

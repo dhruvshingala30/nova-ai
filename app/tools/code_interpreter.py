@@ -71,6 +71,10 @@ class CodeInterpreter:
             "import math, sys\n"
             "import numpy as np\n"
             "import pandas as pd\n"
+            "# Set Pandas display limits to prevent context overflow\n"
+            "pd.set_option('display.max_rows', 20)\n"
+            "pd.set_option('display.max_columns', 8)\n"
+            "pd.set_option('display.width', 120)\n"
             "import matplotlib\n"
             "matplotlib.use('Agg')\n"  # Headless backend: stops popup GUI windows from crashing headless containers
             "import matplotlib.pyplot as plt\n"
@@ -122,6 +126,15 @@ class CodeInterpreter:
                 )
 
                 execution_output = output_bytes.decode("utf-8").strip()
+
+                # --- APPLY OUTPUT CAPPING ---
+                MAX_CHARS = 4000
+                if len(execution_output) > MAX_CHARS:
+                    execution_output = (
+                        execution_output[:MAX_CHARS]
+                        + f"\n\n... [Output truncated. Total characters exceeded {MAX_CHARS}]"
+                    )
+
                 return {
                     "success": True,
                     "output": execution_output

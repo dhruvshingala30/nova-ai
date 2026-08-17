@@ -15,3 +15,5 @@ pdfplumber
 langchain-text-splitters
 chromadb
 sentence-transformers
+watchdog
+rank-bm25

@@ -26,6 +26,8 @@ services:
       resources:
         limits:
           cpus: '2.0'
-          memory: 2G   # Increased from 1G for SQLite + Pandas + SymPy/NumPy
+          memory: 4G  # Increased to 4GB for PyTorch, Sentence-Transformers, ChromaDB, and PDF RAG
+        reservations:
+          memory: 1G  # Guarantees minimum baseline memory allocation
     security_opt:
       - no-new-privileges:true

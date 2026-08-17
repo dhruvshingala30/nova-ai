@@ -14,6 +14,7 @@ from ollama import Client
 from prompts import SYSTEM_PROMPT
 from pydantic import ValidationError
 from tools import AVAILABLE_TOOLS
+from tools.knowledge_base_search import get_indexed_documents
 from utils import create_observation, print_step
 
 
@@ -26,22 +27,50 @@ class NovaAI:
         self.memory = SQLiteMemory()
         self.session_id = session_id
 
-        current_date = datetime.now().strftime("%A, %B %d, %Y")  # noqa: DTZ005
-        date_context = f"\nCURRENT SYSTEM DATE AND TIME: TODAY is {current_date}.\n"
-
-        self.system_prompt = date_context + SYSTEM_PROMPT.replace(
-            "{{AVAILABLE_TOOLS}}", self._generate_tools_prompt()
-        )
-
-        self.message_history: list[dict] = [
-            {"role": "system", "content": self.system_prompt}
-        ]
+        self.message_history: list[dict]= []
+        self._refresh_system_prompt()
 
         if session_id:
             saved_history = self.memory.get_session_history(
                 self.session_id, limit=MAX_HISTORY # type: ignore
             )
             self.message_history.extend(saved_history)
+
+    def _refresh_system_prompt(self):
+        """
+        Constructs system prompt with live tools and dynamic knowledge base catalog.
+        """
+        current_date = datetime.now().strftime("%A, %B %d, %Y")  # noqa: DTZ005
+        date_context = f"\nCURRENT SYSTEM DATE AND TIME: TODAY is {current_date}.\n"
+
+        # Dynamically discover indexed documents
+        indexed_docs = get_indexed_documents()
+        if indexed_docs:
+            docs_list_str = "\n".join([f"  - {doc}" for doc in indexed_docs])
+            kb_catalog = f"\nCURRENTLY INDEXED KNOWLEDGE BASE DOCUMENTS:\n{docs_list_str}\n"
+
+        else:
+            kb_catalog = "\nCURRENTLY INDEXED KNOWLEDGE BASE DOCUMENTS: None currently indexed.\n"
+
+        full_prompt = (
+            date_context
+            + kb_catalog
+            + SYSTEM_PROMPT.replace("{{AVAILABLE_TOOLS}}", self._generate_tools_prompt())
+        )
+
+        if not self.message_history:
+            self.message_history.append(
+                {
+                    "role": "system",
+                    "content": full_prompt
+                }
+            )
+
+        else:
+            self.message_history[0] = {
+                "role": "system",
+                "content": full_prompt
+            }
 
     def _generate_tools_prompt(self) -> str:
         """Formats registered tools into structured text for system prompt injection."""
@@ -83,12 +112,12 @@ class NovaAI:
 
     def chat(self) -> OutputFormat:
         """Sends sanitized context history to Ollama and parses structured JSON output."""
-        prepared_messages = self._prepare_context_for_llm()
+        self._refresh_system_prompt()
 
         response = self.client.chat(
             model=self.model,
             format=OutputFormat.model_json_schema(),
-            messages=prepared_messages,
+            messages=self.message_history,
             options={"temperature": 0.0},
         )
 
@@ -103,59 +132,6 @@ class NovaAI:
             print(f"[RAW LLM UNPARSED OUTPUT]: {raw_result}")
             raise
 
-    def _prepare_context_for_llm(self) -> list[dict]:
-        """Injects dynamic execution constraints directly before generation turns."""
-        messages = list(self.message_history)
-
-        if len(messages) > 1 and messages[-1]["role"] == "user":
-            user_text = messages[-1]["content"].lower()
-
-            # 1. Workspace file check directive
-            if any(
-                kw in user_text
-                for kw in ["files", "workspace", "csv", "inspect", "directory"]
-            ):
-                directive = {
-                    "role": "system",
-                    "content": (
-                        "[RUNTIME MANDATE]: The user is asking about workspace files or datasets. "
-                        "You MUST issue a `STEP: TOOL` using `list_workspace_files` or `inspect_csv_schema` right now. "
-                        "Do NOT output STEP: EXPLANATION or STEP: ANSWER."
-                    ),
-                }
-                messages.insert(-1, directive)
-
-            # 2. Weather check directive
-            elif any(
-                kw in user_text 
-                for kw in ["weather", "temperature", "rain", "climate", "hot", "cold", "forecast", 
-                           "overcast", "sunny", "snow", "windy", "humidity", "storm"]
-            ):
-                directive = {
-                    "role": "system",
-                    "content": (
-                        "[RUNTIME MANDATE]: You MUST issue a `get_weather` TOOL step now. "
-                        "Do NOT issue a 'search_web' TOOL AND Do NOT output ANSWER without executing a 'get_weather' tool first."
-                    ),
-                }
-                messages.insert(-1, directive)
-
-            # 3. Document / Knowledge base search directive
-            elif any(
-                kw in user_text
-                for kw in ["pdf", "book", "document", "trading in the zone", "chapter", 
-                           "knowledge base", "search docs", "author", "mark douglas",]
-            ):
-                directive = {
-                    "role": "system",
-                    "content": (
-                        "[RUNTIME MANDATE]: The user is asking about ingested documents, books, or workspace literature. "
-                        "You MUST issue a `STEP: TOOL` using `search_knowledge_base` with a clear search query now. "
-                        "Do NOT output STEP: EXPLANATION or STEP: ANSWER without searching the knowledge base first."
-                    ),
-                }
-                messages.insert(-1, directive)
-        return messages
 
     def execute_tool(self, tool_name: str, tool_input: dict) -> dict:
         """Validates tool parameters against Pydantic schema and executes handler."""
@@ -197,8 +173,8 @@ class NovaAI:
             and "restricted for security reasons" in str(tool_output.get("error"))
         ):
             tool_output["system_guidance"] = (
-                "CRITICAL: Code execution is sandboxed and cannot access external networks or services. "
-                "Select an appropriate data retrieval tool from `AVAILABLE_TOOLS` to fetch live or external information instead."
+                "CRITICAL: Code execution is sandboxed and cannot access external networks. "
+                "Select a registered data retrieval tool instead."
             )
         return tool_output
 

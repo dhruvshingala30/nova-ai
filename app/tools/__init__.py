@@ -1,5 +1,5 @@
 """
-tools.py - Central Tool Registry.
+__init__.py - Central Tool Registry.
 
 Registers all executable tools available to NovaAI, mapping their tool names
 to execution functions, Pydantic input schemas, descriptions, and parameter types.
@@ -35,25 +35,25 @@ AVAILABLE_TOOLS = {
     "get_weather": {
         "function": Weather().get_weather,
         "schema": WeatherInput,
-        "description": "Returns the current weather of cities provided by the user.",
+        "description": "Fetches live weather and temperatures. MANDATORY for all city weather inquiries.",
         "parameters": {"cities": "list[str]"},
     },
     "run_python_code": {
         "function": CodeInterpreter.run_python_code,
         "schema": CodeInterpreterInput,
-        "description": "Executes Python code to perform complex math, symbolic equations, data processing, or custom calculations.",
+        "description": "Executes Python code in a secure sandbox. MANDATORY for math, data analysis on CSVs, or plotting.",
         "parameters": {"code": "str"},
     },
     "search_web": {
         "function": WebSearch.search_web,
         "schema": WebSearchInput,
-        "description": "Searches the web for up-to-date information, current events, and live facts.",
+        "description": "Searches the live internet for recent world news, live events, or topics NOT found in workspace documents.",
         "parameters": {"query": "str"},
     },
     "list_workspace_files": {
         "function": list_workspace_files,
         "schema": ListFilesInput,
-        "description": "Lists files, sizes, and relative paths in the workspace.",
+        "description": "Lists directory file names and sizes in ./nova_workspace. Use ONLY when the user explicitly asks to view/list directory contents.",
         "parameters": {
             "subfolder": "str (optional)",
             "pattern": "str (optional)",
@@ -62,7 +62,7 @@ AVAILABLE_TOOLS = {
     "inspect_csv_schema": {
         "function": inspect_csv_schema,
         "schema": InspectCSVInput,
-        "description": "Inspects a CSV file's structure, column types, shape, and sample data without loading the whole file into LLM memory.",
+        "description": "Inspects columns, data types, and sample rows of a CSV/TSV before running Python code on it.",
         "parameters": {
             "file_path": "str",
             "sample_rows": "int (optional, default=5)",
@@ -71,8 +71,7 @@ AVAILABLE_TOOLS = {
     "inspect_pdf_schema": {
         "function": inspect_pdf_schema,
         "schema": InspectPDFInput,
-        "description": "Inspects a PDF document in `./nova_workspace` to retrieve total pages, "
-        "document metadata, and sample text content from initial pages.",
+        "description": "Inspects PDF structural metadata (page count, author, sample preview). DO NOT use to read or answer questions from a document.",
         "parameters": {
             "file_path": "str",
             "max_pages_to_sample": "int (optional, default=2)",
@@ -82,20 +81,13 @@ AVAILABLE_TOOLS = {
         "function": search_knowledge_base,
         "schema": SearchKnowledgeBaseInput,
         "description": (
-            "Semantically searches ingested PDF documents and workspace files in "
-            "ChromaDB for answers to user questions. Returns relevant text chunks "
-            "along with source file names and page numbers."
+            "Performs semantic & keyword retrieval over all indexed PDFs, books, and documents. "
+            "MANDATORY for answering ANY questions about concepts, facts, quotes, chapters, "
+            "or topics contained within the user's indexed documents."
         ),
         "parameters": {
-            "query": {
-                "type": "string",
-                "description": "The search query or concept to look up in workspace documents.",
-            },
-            "n_results": {
-                "type": "integer(default=3)",
-                "description": "Number of relevant chunks to retrieve (default is 3).",
-            },
-            "required": ["query"]
+            "query": "str",
+            "n_results": "int (optional, default=3)",
         },
     },
 }

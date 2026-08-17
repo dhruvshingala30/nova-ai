@@ -7,6 +7,8 @@ read-eval-print loop (REPL) in the terminal for user interactions.
 
 from agent import NovaAI
 from config import EXIT_COMMANDS
+from core.workspace_manager import workspace
+from core.workspace_watcher import start_workspace_watcher
 from utils import goodbye, print_separator, welcome
 
 
@@ -22,6 +24,10 @@ def main():
 
     print_separator()
     welcome()
+    print_separator()
+
+    # Start the background workspace watcher
+    watcher_observer = start_workspace_watcher(str(workspace.workspace_dir))
     print_separator()
 
     while True:
@@ -45,6 +51,10 @@ def main():
         except (KeyboardInterrupt, EOFError):
             goodbye()
             break
+
+    # Gracefully stop the watcher thread on exit
+    watcher_observer.stop()
+    watcher_observer.join()
 
 
 if __name__ == "__main__":
