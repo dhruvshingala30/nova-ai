@@ -5,17 +5,24 @@ sanitizes history, and orchestrates tool execution.
 """
 
 import re
+import sys
 from datetime import datetime
+from pathlib import Path
 
-from config import MAX_HISTORY, MODEL_NAME, OLLAMA_HOST, STEP_ICONS
-from core.memory import SQLiteMemory
-from models import OutputFormat
 from ollama import Client
-from prompts import SYSTEM_PROMPT
 from pydantic import ValidationError
-from tools import AVAILABLE_TOOLS
-from tools.knowledge_base_search import get_indexed_documents
-from utils import create_observation, print_step
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from app.config import MAX_HISTORY, MAX_RETRIES, MODEL_NAME, OLLAMA_HOST, STEP_ICONS
+from app.core.memory import SQLiteMemory
+from app.models import OutputFormat
+from app.prompts import SYSTEM_PROMPT
+from app.tools import AVAILABLE_TOOLS
+from app.tools.knowledge_base_search import get_indexed_documents
+from app.utils import create_observation, print_step
 
 
 class NovaAI:
@@ -84,6 +91,43 @@ class NovaAI:
             )
         return "\n\n".join(lines)
 
+
+    def _clean_json_output(self, raw_content: str) -> str:
+            """Strips Markdown code block wrappers from LLM response strings if present."""
+            cleaned = raw_content.strip()
+            if cleaned.startswith("```"):
+                cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+                cleaned = re.sub(r"\s*```$", "", cleaned)
+            return cleaned.strip()
+
+
+    def _assess_hitl_risk(self, tool_name: str, tool_input: dict) -> tuple[bool, str]:
+            """
+            Dynamically analyzes tool payload to detect destructive operations,
+            file modifications, or workspace writes.
+            """
+            # 1. Inspect Python code for file modifications / disk writes
+            if tool_name == "run_python_code":
+                code = tool_input.get("code", "")
+
+                # Patterns that modify, write, or delete workspace files
+                destructive_patterns = [
+                    (r"\.to_csv\s*\(", "Modifying / writing a CSV file to disk"),
+                    (r"\.to_json\s*\(", "Modifying / writing a JSON file to disk"),
+                    (r"\.to_parquet\s*\(", "Writing a Parquet file to disk"),
+                    (r"open\s*\([^)]*['\"][wa\+]b?['\"]", "Opening a file in write/append mode"),
+                    (r"os\.(remove|unlink|rmdir|rename)", "File or directory deletion / renaming"),
+                    (r"shutil\.(rmtree|move)", "Destructive directory manipulation"),
+                    (r"plt\.savefig\s*\(", "Saving a chart / image to workspace"),
+                ]
+
+                for pattern, reason in destructive_patterns:
+                    if re.search(pattern, code):
+                        return True, reason
+
+            return False, ""
+
+
     def add_message(self, role: str, content: str, save_to_db: bool = True):
         """Appends a message to context history and persists to SQLite."""
         self.message_history.append({"role": role, "content": content})
@@ -102,13 +146,6 @@ class NovaAI:
                 *self.message_history[-MAX_HISTORY:],
             ]
 
-    def _clean_json_output(self, raw_content: str) -> str:
-        """Strips Markdown code block wrappers from LLM response strings if present."""
-        cleaned = raw_content.strip()
-        if cleaned.startswith("```"):
-            cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
-            cleaned = re.sub(r"\s*```$", "", cleaned)
-        return cleaned.strip()
 
     def chat(self) -> OutputFormat:
         """Sends sanitized context history to Ollama and parses structured JSON output."""
@@ -178,24 +215,43 @@ class NovaAI:
             )
         return tool_output
 
+
     def observe(self, tool_name: str, tool_input: dict, tool_output: dict):
-        """Passes formatted observation payload with an unfulfilled subtask check back to chat history."""
+        """
+        Passes formatted observation payload with error self-correction cues back to chat history.
+        """
         observation_json = create_observation(tool_name, tool_input, tool_output)
 
-        # Inject an unfulfilled subtask check inside the observation prompt
-        subtask_reminder = (
-            "\n\n[SYSTEM CHECK]: Review the user's query. If the observation above provides "
-            "all the information requested by the user, your NEXT step MUST be `STEP: ANSWER`. "
-            "Do NOT trigger additional tools unless explicitly requested by the prompt."
-        )
+        # Check if tool execution resulted in a failure
+        is_error = False
+        if isinstance(tool_output, dict) and (
+            tool_output.get("success") is False or tool_output.get("status") == "error"
+        ):
+            is_error = True
+
+        if is_error:
+            guidance = (
+                "\n\n[SYSTEM ALERT - TOOL EXECUTION FAILED]: The tool execution encountered an error. "
+                "Analyze the error message/traceback above. Your NEXT turn MUST be `STEP: REFLECT` diagnosing "
+                "the root cause, followed immediately by a corrected `STEP: TOOL` action. Do NOT give up or repeat the identical failing command."
+            )
+        else:
+            guidance = (
+                "\n\n[SYSTEM CHECK]: Review the user's query. If the observation above provides "
+                "all the information requested by the user, your NEXT step MUST be `STEP: ANSWER`. "
+                "Do NOT trigger additional tools unless explicitly requested by the prompt."
+            )
 
         self.add_message(
             role="user",
-            content=observation_json + subtask_reminder,
+            content=observation_json + guidance,
         )
 
+
     def run(self, user_query: str):
-        """Main ReAct execution loop handling multi-step reasoning and subtasks."""
+        """
+        Main ReAct execution loop handling planning, tool execution, and reflection.
+        """
         if self.session_id is None:
             self.session_id = self.memory.generate_title_from_prompt(
                 client=self.client,
@@ -206,10 +262,51 @@ class NovaAI:
 
         self.add_message(role="user", content=user_query)
 
+        consicutive_error = 0
         while True:
             parsed_result = self.chat()
 
-            if parsed_result.STEP == "TOOL":
+            # ---------------------------------------------------------
+            # 1. MULTI-STEP PLANNER STEP
+            # ---------------------------------------------------------
+            if parsed_result.STEP == "PLAN":
+                # Print the plan and each numbered step
+                print_step(
+                    "PLAN", 
+                    parsed_result.CONTENT or "Execution Plan Formulated", 
+                    None
+                )
+                if parsed_result.PLAN_STEPS:
+                    for idx, step_desc in enumerate(parsed_result.PLAN_STEPS, start=1):
+                        print(f"   {idx}. {step_desc}")
+
+                # Prompt model to execute Step 1 of the plan
+                self.add_message(
+                    role="user",
+                    content="[PLAN ACCEPTED] Proceed with your Step 1 or your plan now."
+                )
+                continue
+
+            # ---------------------------------------------------------
+            # 2. REFLECTION & SELF-CORRECTION STEP
+            # ---------------------------------------------------------
+            elif parsed_result.STEP == "REFLECT":
+                print_step(
+                    step="REFLECT",
+                    content=parsed_result.CONTENT or "Analysing execution error...",
+                    tool=None,
+                )
+
+                self.add_message(
+                    role="user",
+                    content="[REFLECTION ACKNOWLEDGED]: Now execute the corrected tool step.",
+                )
+                continue
+
+            # ---------------------------------------------------------
+            # 3. TOOL EXECUTION STEP
+            # ---------------------------------------------------------
+            elif parsed_result.STEP == "TOOL":
                 tool_name = parsed_result.TOOL
                 tool_input = parsed_result.INPUT
 
@@ -229,16 +326,66 @@ class NovaAI:
                     parsed_result.CONTENT or "", 
                     parsed_result.TOOL
                 )
+
+                # ---------------------------------------------------------
+                # DYNAMIC HITL SAFEGUARD
+                # ---------------------------------------------------------
+                requires_approval, reason = self._assess_hitl_risk(
+                    tool_name, tool_input
+                )
+
+                if requires_approval:
+                    print("\n ⚠️  [HITL SAFEGUARD - HUMAN APPROVAL REQUIRED]")
+                    print(f"   Reason: {reason}")
+                    print(f"   Tool: {tool_name}")
+                    if "code" in tool_input:
+                        print("   --- Code Preview ---")
+                        for line in tool_input["code"].strip().split("\n"):
+                            print(f"   | {line}")
+                        print("   --------------------")
+
+                    approval = (
+                        input("👉 Approve this workspace modification? (y/n): ")
+                        .strip()
+                        .lower()
+                    )
+
+                    if approval not in ["y", "yes"]:
+                        print("🚫 Action denied by human operator.")
+                        self.observe(
+                            tool_name=tool_name,
+                            tool_input=tool_input,
+                            tool_output={
+                                "success": False,
+                                "error": f"Execution was rejected by the human operator for reason: '{reason}'. Adjust your strategy or explain the cancellation to the user.",
+                            },
+                        )
+                        continue
+                # ---------------------------------------------------------
                 
                 tool_output = self.execute_tool(tool_name, tool_input)
 
-                # PRINT INSTANT DEBUG LOG IF TOOL EXECUTION FAILS
-                if isinstance(tool_output, dict) and tool_output.get("success") is False:
-                    print(f"❌ [TOOL EXECUTION ERROR]: {tool_output.get('error')}")
+                # Track consecutive failures for infinite loop protection
+                is_failed = isinstance(tool_output, dict) and (
+                    tool_output.get("success") is False or tool_output.get("status") == "error"
+                )
+                if is_failed:
+                    consicutive_error += 1
+                    print(f"❌ [TOOL ERROR]: {tool_output.get('error') or tool_output.get('message')}")
+                    if consicutive_error >= MAX_RETRIES:
+                        print(f"⚠️ [CIRCUIT BREAKER]: Maximum retries ({MAX_RETRIES}) reached. Aborting tool loop.")
+                        self.add_message(
+                            role="user",
+                            content=f"[SYSTEM OVERRIDE]: Maximum retry limit ({MAX_RETRIES}) reached for the tool. Proceed to 'STEP: ANSWER' summarizing the failure"
+                        )
+                else:
+                    consicutive_error = 0
 
                 self.observe(tool_name, tool_input, tool_output)
 
-
+            # ---------------------------------------------------------
+            # 4. EXPLANATION OR FINAL ANSWER STEP
+            # ---------------------------------------------------------
             elif parsed_result.STEP in STEP_ICONS:
                 print_step(parsed_result.STEP, parsed_result.CONTENT or "", None)
 

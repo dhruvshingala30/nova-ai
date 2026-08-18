@@ -448,6 +448,24 @@ Instead of returning an entire dataset or thousands of printed lines, the execut
 
 ---
 
+### 📋 Multi-Step Planning
+
+Decomposes complex, multi-action queries into structured subtasks before calling tools.
+
+---
+
+### 💡 Autonomous Reflection & Error Recovery
+
+Self-corrects when tool executions fail (e.g., missing data, syntax errors, or schema mismatches).
+
+---
+
+### 🛡️ Dynamic Human-in-the-Loop (HITL)
+
+Automatically intercepts destructive disk writes, deletions, or file updates and requests human confirmation before proceeding.
+
+---
+
 ## 🧠 How Nova AI Works
 
 ```text
@@ -603,6 +621,10 @@ Nova AI currently provides:
 - 📚 Local vector knowledge storage
 - 🔗 Multi-tool result synthesis
 - 🧠 Observation-driven final answer generation
+- 📋 Multi-step ReAct task planning and decomposition
+- 💡 Autonomous reflection and self-correction on tool failures
+- 🛡️ Dynamic Human-in-the-Loop confirmation for workspace modifications
+- 🧪 Automated evaluation test suite for agent routing and safety
 
 ---
 
@@ -618,9 +640,6 @@ Current safeguards include:
 - DataFrame output capping
 - Structured tool inputs using Pydantic
 - Workspace monitoring and controlled ingestion
-
-Future reliability mechanisms include:
-
 - Automated agent evaluation
 - Human-in-the-loop approval for sensitive operations
 - Planning and reflection
@@ -663,6 +682,9 @@ nova-ai/
 │
 ├── rag/
 │   └── ingest_pdf.py
+│
+├── tests/
+│   └── test_eval_suite.py              # Automated evaluation benchmark harness
 │
 ├── .dockerignore
 ├── .env.example
@@ -909,6 +931,36 @@ According to Mark Douglas in his book 'Trading in the Zone', approximately
 
 ---
 
+### Multi-Step Planning & Human-in-the-Loop (HITL)
+
+```text
+You:
+Add a column 'seniority' to users.csv and save the updated file.
+
+Nova AI:
+📋 : First, I need to inspect the schema of 'users.csv' before adding a new column.
+   1. Step 1: Inspect the schema of 'users.csv'.
+   2. Step 2: Add a new column 'seniority' to the DataFrame.
+   3. Step 3: Save the updated file.
+
+🛠️ : inspect_csv_schema
+🛠️ : run_python_code
+
+⚠️  [HITL SAFEGUARD - HUMAN APPROVAL REQUIRED]
+   Reason: Modifying / writing a CSV file to disk
+   Tool: run_python_code
+   --- Code Preview ---
+   | users_df.to_csv('users.csv', index=False)
+   --------------------
+👉 Approve this workspace modification? (y/n): n
+🚫 Action denied by human operator.
+
+💡 : The operation to modify 'users.csv' on disk was rejected. I will simulate the addition in memory instead.
+🤖 : The column 'seniority' has been added in-memory for users.csv...
+```
+
+---
+
 ## 🚀 Development Roadmap
 
 ### ✅ Phase 1: Foundation & Tools (Complete)
@@ -953,9 +1005,9 @@ grounding.
 
 #### Agent Reasoning
 
-- [ ] ReAct Planning & Reflection Loop
-- [ ] Automated Evaluation Test Suite
-- [ ] Human-in-the-Loop Safeguards
+- [x] ReAct Planning & Reflection Loop
+- [x] Automated Evaluation Test Suite
+- [x] Human-in-the-Loop Safeguards
 
 #### Advanced Capabilities
 

@@ -19,16 +19,18 @@ class OutputFormat(BaseModel):
     from the LLM's JSON response.
 
     Attributes:
-        STEP (Literal): Current execution phase ("START", "EXPLANATION", "TOOL", or "ANSWER").
-        CONTENT (str): Human-readable explanation or summary of the current step.
+        STEP (Literal): Current execution phase ("START", "PLAN", "REFLECT", "EXPLANATION", "TOOL", or "ANSWER").
+        CONTENT (str): Human-readable explanation, reflection diagnosis, or summary.
         TOOL (str | None): Name of the tool to invoke (only populated when STEP == "TOOL").
         INPUT (dict[str, Any] | None): Dictionary of arguments to pass to the tool function.
+        PLAN_STEPS (list[str] | None): Ordered list of subtasks when formulating a plan.
     """
 
-    STEP: Literal["START", "EXPLANATION", "TOOL", "ANSWER"]
+    STEP: Literal["START", "PLAN", "REFLECT", "EXPLANATION", "TOOL", "ANSWER"]
     CONTENT: str
     TOOL: str | None = None
     INPUT: dict[str, Any] | None = None
+    PLAN_STEPS: list[str] | None = None
 
 
 # -----------------------------------------------

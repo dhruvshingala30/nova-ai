@@ -26,6 +26,11 @@ MAX_HISTORY = 20
 TIME_OUT = 10
 
 # -------------------------------
+# Agent Chat Memory Configuration
+# -------------------------------
+MAX_RETRIES = 3
+
+# -------------------------------
 # Application UI & Output Formatting
 # -------------------------------
 # Welcome message displayed upon entry
@@ -43,6 +48,8 @@ END_TEXT = "\n  🤖 BYE !!!👋👋  \n"
 # Emojis/Icons mapped to each step in the ReAct execution protocol
 STEP_ICONS = {
     "START": "🔥",
+    "PLAN": "📋",
+    "REFLECT": "💡",
     "EXPLANATION": "🧠",
     "TOOL": "🛠️",
     "ANSWER": "🤖",
