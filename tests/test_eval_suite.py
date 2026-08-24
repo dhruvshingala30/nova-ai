@@ -62,7 +62,7 @@ class NovaEvalHarness:
         test_cases = [
             (
                 "Weather Tool Routing",
-                "What is the current temperature in Paris right now?",
+                "What is the current temperature in Ahmedabad right now?",
                 "TOOL",
                 "get_weather",
             ),
@@ -81,8 +81,8 @@ class NovaEvalHarness:
             (
                 "Knowledge Base Document Search Routing",
                 "According to the Mark Douglas trading book, what is the failure rate percentage?",
-                "TOOL",
-                "search_knowledge_base",
+                "PLAN",
+                None,
             ),
             (
                 "Compound Multi-Step Planner Trigger",

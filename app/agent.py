@@ -233,7 +233,8 @@ class NovaAI:
             guidance = (
                 "\n\n[SYSTEM ALERT - TOOL EXECUTION FAILED]: The tool execution encountered an error. "
                 "Analyze the error message/traceback above. Your NEXT turn MUST be `STEP: REFLECT` diagnosing "
-                "the root cause, followed immediately by a corrected `STEP: TOOL` action. Do NOT give up or repeat the identical failing command."
+                "the root cause, followed either by a corrected `STEP: TOOL` action OR `STEP: ANSWER` if the operation is forbidden or impossible. "
+                "Do NOT repeat the exact same failing command."
             )
         else:
             guidance = (
@@ -308,15 +309,15 @@ class NovaAI:
             # ---------------------------------------------------------
             elif parsed_result.STEP == "TOOL":
                 tool_name = parsed_result.TOOL
-                tool_input = parsed_result.INPUT
+                tool_input = parsed_result.INPUT if parsed_result.INPUT is not None else {}
 
-                if not tool_name or tool_input is None:
+                if not tool_name:
                     self.observe(
                         tool_name="system",
                         tool_input={},
                         tool_output={
                             "success": False,
-                            "error": "STEP 'TOOL' requires a valid 'TOOL' and 'INPUT' object.",
+                            "error": "STEP 'TOOL' requires a valid 'TOOL' name.",
                         },
                     )
                     continue

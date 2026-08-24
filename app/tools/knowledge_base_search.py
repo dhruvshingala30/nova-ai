@@ -23,7 +23,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from app.core.hyde import hyde_generator
 
-VECTOR_DB_DIR = str(PROJECT_ROOT / "data/vector_db")
+VECTOR_DB_DIR = str((PROJECT_ROOT / "data" / "vector_db").resolve())
 COLLECTION_NAME = "nova_workspace_docs"
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 

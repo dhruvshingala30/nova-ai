@@ -1,17 +1,17 @@
 from pathlib import Path
 
+# 1. Calculates project root (nova-ai/)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 class WorkspaceManager:
     def __init__(self, workspace_dir: str  = "nova_workspace") -> None:
-        if workspace_dir is None:
-            # 1. Calculates project root (nova-ai/)
-            PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-            # 2. Points directly to nova-ai/nova_workspace
-            self.workspace_dir = (PROJECT_ROOT / workspace_dir).resolve()
+        workspace_path = Path(workspace_dir)
+        if workspace_path.is_absolute():
+            self.workspace_dir = workspace_path
         else:
-            self.workspace_dir = Path(workspace_dir).resolve()
+            self.workspace_dir = (PROJECT_ROOT / workspace_path).resolve()
 
-        # 3. Auto-creates the folder on root if it doesn't exist yet
+        # Pre-create directory inside project root
         self.workspace_dir.mkdir(parents=True, exist_ok=True)
 
     def resolve_safe_path(self, relative_path: str) -> Path:
