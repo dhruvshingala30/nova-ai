@@ -14,6 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.models import (
     CodeInterpreterInput,
     InspectCSVInput,
+    InspectImageInput,
     InspectPDFInput,
     ListFilesInput,
     SearchKnowledgeBaseInput,
@@ -26,6 +27,7 @@ from app.tools.weather import Weather
 from app.tools.web_search import WebSearch
 from app.tools.workspace_tools import (
     inspect_csv_schema,
+    inspect_image,
     inspect_pdf_schema,
     list_workspace_files,
 )
@@ -89,6 +91,18 @@ AVAILABLE_TOOLS = {
             "query": "str",
             "n_results": "int (optional, default=3)",
         },
+    },
+    "inspect_image": {
+        "function": inspect_image,
+        "schema": InspectImageInput,
+        "description": (
+            "Analyzes, describes, and extracts information from images or charts (.png, .jpg, .webp) "
+            "located in the workspace using multimodal vision. MANDATORY whenever the user asks about an image, photo, plot, diagram, or chart."
+        ),
+        "parameters": {
+            "file_path": "str",
+            "prompt": "str (optional)",
+        }
     },
 }
 

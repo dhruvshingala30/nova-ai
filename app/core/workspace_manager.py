@@ -23,7 +23,18 @@ class WorkspaceManager:
         clean_rel = relative_path.lstrip("/\\")
 
         # Strip accidental prefix aliases the LLM might hallucinate
-        for prefix in ("nova_workspace/", "workspace/", "./nova_workspace/", "./workspace/"):
+        for prefix in (
+            "./nova_workspace/",
+            "./workspace/",
+            "nova_workspace/",
+            "workspace/",
+            "./nova_workspace",
+            "./workspace",
+            "nova_workspace",
+            "workspace",
+        ):
+            if clean_rel == prefix or clean_rel == prefix.rstrip("/"):
+                return self.workspace_dir
             clean_rel = clean_rel.removeprefix(prefix)
 
         target_path = (self.workspace_dir / clean_rel).resolve()

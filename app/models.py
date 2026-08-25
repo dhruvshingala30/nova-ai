@@ -133,3 +133,16 @@ class SearchKnowledgeBaseInput(BaseModel):
         le=10,
         description="Number of relevant chunks to retrieve (default is 3).",
     )
+
+# ----------------------------------------------------
+# Pydantic Schema for Inspect Image Tool Input
+# ----------------------------------------------------
+class InspectImageInput(BaseModel):
+    file_path: str = Field(
+        default=...,
+        description="Relative path to the image to the image file inside workspace (e.g., 'chart.png' or 'diagram.jpg')",
+    )
+    prompt: str = Field(
+        default="Describe this image in detail and extract all key visuals insights, labels and text.",
+        description="The specific question, observation request, or analysis prompt to ask about this image",
+    )

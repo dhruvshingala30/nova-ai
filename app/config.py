@@ -15,6 +15,7 @@ OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 
 # Local LLM model identifier used for agent reasoning
 MODEL_NAME = os.getenv("MODEL_NAME", "qwen2.5:7b")
+VISION_MODEL_NAME = os.getenv("VISION_MODEL_NAME", "llava")
 
 # -------------------------------
 # Agent Chat Memory Configuration
