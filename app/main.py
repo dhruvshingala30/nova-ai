@@ -1,58 +1,54 @@
 """
-main.py - Entry Point for NovaAI Interactive CLI Agent.
+main.py - Entry Point for NovaAI Interactive Multi-Agent CLI.
 
-This module initializes the NovaAI agent instance and maintains an interactive
-read-eval-print loop (REPL) in the terminal for user interactions.
+Initializes the MultiAgentOrchestrator and manages the REPL loop
+with background workspace monitoring.
 """
 
-from agent import NovaAI
 from config import EXIT_COMMANDS
 from core.workspace_manager import workspace
 from core.workspace_watcher import start_workspace_watcher
+from orchestrator import MultiAgentOrchestrator
 from utils import goodbye, print_separator, welcome
 
 
 def main():
     """
-    Main loop for interacting with NovaAI.
-
-    Creates a new agent instance with lazy session creation (title auto-generated
-    on prompt #1) and processes continuous user inputs.
+    Main loop for interacting with the Multi-Agent NovaAI framework.
     """
-    # Initialize the core NovaAI agent engine
-    agent = NovaAI()
+    # Initialize the Multi-Agent Orchestrator (Supervisor)
+    orchestrator = MultiAgentOrchestrator()
 
     print_separator()
     welcome()
+    print("🤝 NovaAI Multi-Agent Collaboration Engine Active (Phase 3.1)")
     print_separator()
 
-    # Start the background workspace watcher
+    # Start the workspace watcher for automatic PDF/CSV ingestion[cite: 1]
     watcher_observer = start_workspace_watcher(str(workspace.workspace_dir))
     print_separator()
 
     while True:
         try:
-            # Accept query input from user
+            # Prompt user for natural language input
             user_query = input("👉 ")
 
-            # Check for empty input
             if not user_query.strip():
                 continue
-            
-            # Check if user wants to exit the application
+
             if user_query.strip().lower() in EXIT_COMMANDS:
                 goodbye()
                 break
 
-            # Execute the agentic reasoning and tool execution loop
-            agent.run(user_query)
+            # Execute the multi-agent reasoning and delegation pipeline
+            orchestrator.run(user_query)
             print_separator()
 
         except (KeyboardInterrupt, EOFError):
             goodbye()
             break
 
-    # Gracefully stop the watcher thread on exit
+    # Gracefully shut down background observer thread on exit
     watcher_observer.stop()
     watcher_observer.join()
 

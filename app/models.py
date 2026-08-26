@@ -1,22 +1,23 @@
 """
 models.py - Agent Output Data Contracts & Schemas.
 
-Defines the Pydantic data structure used for strict JSON response parsing
-from the local LLM.
+Defines the Pydantic data structures used for single-agent ReAct parsing,
+individual tool inputs, and Phase 3.1 Multi-Agent Collaboration protocol handoffs.
 """
 
+from enum import Enum
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
 
-# --------------------------------------
-# Pydantic Schema for LLM Output Parsing
-# --------------------------------------
+# -------------------------------------------------------------
+# Single-Agent / Specialist Internal Step Schema
+# -------------------------------------------------------------
 class OutputFormat(BaseModel):
     """
-    Data contract enforcing the ReAct protocol step structure expected
-    from the LLM's JSON response.
+    Data contract enforcing the step structure expected from the LLM
+    during internal reasoning and execution.
 
     Attributes:
         STEP (Literal): Current execution phase ("START", "PLAN", "REFLECT", "EXPLANATION", "TOOL", or "ANSWER").
@@ -32,6 +33,99 @@ class OutputFormat(BaseModel):
     INPUT: dict[str, Any] | None = None
     PLAN_STEPS: list[str] | None = None
 
+
+# -------------------------------------------------------------
+# Phase 3.1 Multi-Agent Communication & Delegation Schemas
+# -------------------------------------------------------------
+class AgentRole(str, Enum):
+    """
+    Enumeration of all available specialist worker agents in the team.
+    """
+
+    SUPERVISOR = "SupervisorAgent"
+    RESEARCHER = "ResearchAgent"
+    DATA_ANALYST = "DataAnalystAgent"
+    DOC_VISION = "DocVisionAgent"
+
+
+class SubTask(BaseModel):
+    """
+    Represents an atomic task delegated by the Supervisor to a specialist.
+    """
+
+    task_id: int = Field(
+        default=..., 
+        description="Sequential index identifier for this subtask (e.g., 1, 2, 3).",
+    )
+    assigned_agent: AgentRole = Field(
+        default=..., 
+        description="The target worker agent best equipped to handle this task.",
+    )
+    instruction: str = Field(
+        default=...,
+        description="Clear, context-contained instruction explaining what the agent must do.",
+    )
+    dependencies: list[int] = Field(
+        default_factory=list,
+        description="List of task_ids that must complete before this task can start.",
+    )
+    expected_output: str = Field(
+        default=...,
+        description="Brief description of the expected output format or key facts needed.",
+    )
+
+
+class TaskResult(BaseModel):
+    """
+    Structured outcome returned by a worker agent after finishing an assigned subtask.
+    """
+
+    task_id: int
+    assigned_agent: str
+    status: Literal["SUCCESS", "FAILED"]
+    summary: str = Field(
+        default=...,
+        description="Concise factual findings, code results, or extracted knowledge.",
+    )
+    artifacts: list[str] = Field(
+        default_factory=list,
+        description="List of filenames or resources generated in workspace (e.g., 'chart.png').",
+    )
+    error_message: str | None = None
+
+
+class SupervisorDecision(BaseModel):
+    """
+    Response schema produced by the Supervisor on each orchestration turn.
+    """
+
+    ACTION: Literal["DELEGATE", "SYNTHESIZE", "DIRECT_ANSWER"] = Field(
+        default=...,
+        description=(
+            "Action choice: 'DELEGATE' to assign subtasks to specialist workers; "
+            "'SYNTHESIZE' to combine completed worker results into the final user answer; "
+            "'DIRECT_ANSWER' for everyday conversational greetings or basic factual queries."
+        ),
+    )
+    REASONING: str = Field(
+        default=...,
+        description="Supervisor's internal step-by-step logic behind the delegation or synthesis.",
+    )
+    SUBTASKS: list[SubTask] | None = Field(
+        default=None, 
+        description="List of subtasks when ACTION is 'DELEGATE'.",
+    )
+    FINAL_ANSWER: str | None = Field(
+        default=None,
+        description="Consolidated final user response when ACTION is 'SYNTHESIZE' or 'DIRECT_ANSWER'.",
+    )
+
+
+# =============================================================
+# =============================================================
+# Tool Input Validation Schemas
+# =============================================================
+# =============================================================
 
 # -----------------------------------------------
 # Pydantic Schema for Code Interpreter Tool Input

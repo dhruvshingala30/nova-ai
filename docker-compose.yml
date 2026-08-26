@@ -11,10 +11,12 @@ services:
       - ENVIRONMENT=production
       - TAVILY_API_KEY=${TAVILY_API_KEY}
       - HOST_PROJECT_PATH=${PWD}
+      - HF_HOME=/app/data/hf_cache  # <-- Direct Hugging Face cache to project root
     volumes:
       # Mount local directory to container so SQLite database persists across container updates
       - .:/app   # Persists nova_memory.db and local workspace files
       - /var/run/docker.sock:/var/run/docker.sock   # <-- CRITICAL: Allows container to trigger Docker Desktop
+      - hf_cache:/root/.cache/huggingface   # <-- Persist HF models across container restarts
     extra_hosts:
       - "host.docker.internal:host-gateway"
     
@@ -31,3 +33,6 @@ services:
           memory: 1G  # Guarantees minimum baseline memory allocation
     security_opt:
       - no-new-privileges:true
+
+volumes:
+  hf_cache:   # <-- Named volume to store downloaded weights permanently

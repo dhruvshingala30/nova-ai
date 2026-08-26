@@ -1,10 +1,18 @@
 # 🚀 Nova AI
 
-> A modular Agentic AI framework that reasons, remembers, retrieves knowledge, analyzes data, executes code safely, and uses external tools through local LLMs.
+> A modular Agentic AI framework that reasons, remembers, retrieves knowledge,
+> understands multimodal inputs, analyzes data, executes code safely,
+> collaborates through specialized agents, and uses external tools through
+> local LLMs.
 
-Nova AI is an extensible AI Agent built with Python and local LLMs. Instead of relying only on language generation, Nova AI can reason about a user's request, decide whether external tools are required, execute them, observe the results, and generate accurate, grounded responses.
+Nova AI is an extensible AI Agent built with Python and local LLMs. Instead
+of relying only on language generation, Nova AI can reason about a user's
+request, plan and decompose complex tasks, select appropriate tools or
+specialized agents, execute them, observe their results, and synthesize
+grounded final responses.
 
-The project is being developed incrementally to understand and implement the core building blocks of modern AI agents from first principles.
+The project is being developed incrementally to understand and implement the
+core building blocks of modern AI agents from first principles.
 
 ---
 
@@ -469,78 +477,45 @@ Automatically intercepts destructive disk writes, deletions, or file updates and
 ## 🧠 How Nova AI Works
 
 ```text
-┌─────────────────────────────────────────────────────────────────────┐
-│                                 USER                                │
-└──────────────────────────────────┬──────────────────────────────────┘
-                                   │
-                                   ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                           LOCAL LLM · QWEN                          │
-│                        Reason • Plan • Decide                       │
-└──────────────────────────────────┬──────────────────────────────────┘
-                                   │
-                                   ▼
-┌─────────────────────────────────────────────────────────────────────┐
-│                           TOOL ROUTER                               │
-└───────┬───────────┬───────────┬───────────┬───────────────┬─────────┘
-        │           │           │           │               │
-        ▼           ▼           ▼           ▼               ▼
-   ┌─────────┐ ┌─────────┐ ┌─────────┐ ┌────────────┐ ┌─────────────┐
-   │ WEATHER │ │   WEB   │ │ MEMORY  │ │  WORKSPACE │ │ KNOWLEDGE   │
-   │   API   │ │ SEARCH  │ │ SQLite  │ │   TOOLS    │ │    BASE     │
-   └─────────┘ └─────────┘ └─────────┘ └─────┬──────┘ └──────┬──────┘
-                                             │               │
-                              ┌──────────────┴──────┐        │
-                              ▼                     ▼        ▼
-                         ┌─────────┐           ┌─────────┐ ┌──────────┐
-                         │ CSV/TSV │           │   PDF   │ │   HyDE   │
-                         │ Analysis│           │Parsing  │ │  Query   │
-                         └────┬────┘           └────┬────┘ │Expansion │
-                              │                     │      └────┬─────┘
-                              │                     │           │
-                              ▼                     ▼           ▼
-                         ┌─────────────────┐   ┌──────────────────────┐
-                         │ PYTHON CODE     │   │    HYBRID SEARCH     │
-                         │  INTERPRETER    │   │                      │
-                         │                 │   │ Dense + BM25 → RRF   │
-                         └────────┬────────┘   └──────────┬───────────┘
-                                  │                       │
-                                  ▼                       ▼
-                         ┌─────────────────┐       ┌─────────────┐
-                         │ DOCKER SANDBOX  │       │   RANKED    │
-                         │                 │       │   CONTEXT   │
-                         │ Math • Science  │       └──────┬──────┘
-                         │ Data • Charts   │              │
-                         └────────┬────────┘              │
-                                  │                       │
-                                  └───────────┬───────────┘
-                                              │
-                                              ▼
-                                ┌───────────────────────────┐
-                                │        OBSERVATION        │
-                                │   Tool Results + Context  │
-                                └─────────────┬─────────────┘
-                                                │
-                                                ▼
-                                ┌───────────────────────────┐
-                                │     LOCAL LLM · QWEN      │
-                                │    Reason • Synthesize    │
-                                │   Combine Tool Results    │
-                                └─────────────┬─────────────┘
-                                                │
-                                                ▼
-                                ┌───────────────────────────┐
-                                │         FINAL ANSWER      │
-                                └───────────────────────────┘
+                    User
+                     │
+                     ▼
+                  Qwen LLM
+                     │
+              ┌──────┴──────┐
+              │             │
+              ▼             ▼
+       Single-Agent      Supervisor
+        Tool Loop          Agent
+              │             │
+              │       ┌─────┼─────┐
+              │       ▼     ▼     ▼
+              │    Research Data  ...
+              │     Agent  Agent
+              │       │     │
+              └───────┴─────┘
+                      │
+                      ▼
+                 Observations
+                      │
+                      ▼
+                  Qwen LLM
+                      │
+                      ▼
+                 Final Answer
 ```
 
-The LLM is responsible for:
+The agent architecture is responsible for:
 
 - Understanding user intent
-- Selecting the appropriate tool
+- Determining whether a single-agent or multi-agent workflow is required
+- Planning and decomposing complex tasks
+- Selecting appropriate tools and specialist agents
 - Passing structured arguments
-- Observing tool outputs
-- Producing the final response
+- Observing tool and agent outputs
+- Combining intermediate results
+- Reflecting and recovering from failures
+- Synthesizing the final response
 
 ---
 
@@ -549,6 +524,8 @@ The LLM is responsible for:
 ### 🤖 AI & Agent Core
 
 - Ollama
+- Qwen 2.5 7B
+- LLaVA
 - Pydantic
 - AnyIO
 - HTTPX
@@ -584,10 +561,18 @@ The LLM is responsible for:
 - Docker
 - Watchdog
 
+#### Local Models
+
+- **Qwen 2.5 7B** — Primary reasoning and agent orchestration model
+- **LLaVA** — Vision and multimodal image understanding model
+- **Ollama** — Local runtime for serving and interacting with both models
+
 ### 🏗️ Architecture
 
 - Local LLM inference with Ollama
-- Tool Calling
+- Tool Calling & Dynamic Tool Routing
+- Multi-Agent Collaboration with Supervisor/Worker Agents
+- ReAct Planning & Reflection
 - Pydantic Input Validation
 - Persistent SQLite Memory
 - Local Vector Database
@@ -596,6 +581,10 @@ The LLM is responsible for:
 - Reciprocal Rank Fusion (RRF)
 - Automatic Workspace File Monitoring
 - Docker-isolated Python Code Execution
+- Multimodal Vision with LLaVA
+- Automated Agent Evaluation
+- Human-in-the-Loop Safeguards
+- Observation-driven Tool Result Synthesis
 
 ---
 
@@ -610,6 +599,9 @@ Nova AI currently provides:
 - 👀 Automatic workspace file monitoring
 - 📊 CSV / TSV inspection and analysis
 - 📄 PDF inspection and parsing
+- 🖼️ Multimodal image understanding
+- 🤝 Supervisor-based multi-agent collaboration
+- 👥 Specialized agent delegation and result synthesis
 - 🔎 Local semantic RAG
 - 🔬 Hybrid RAG with Dense + BM25 retrieval
 - 🔀 Reciprocal Rank Fusion (RRF)
@@ -652,12 +644,18 @@ Current safeguards include:
 ```text
 nova-ai/
 ├── app/
+│   ├── agents/                     # Multi-Agent Worker Implementations
+│   │   ├── __init__.py
+│   │   ├── base_agent.py           # Base specialist abstraction
+│   │   └── specialists.py          # ResearchAgent, DataAnalystAgent, DocVisionAgent
+│   │
 │   ├── core/
 │   │   ├── __init__.py
 │   │   ├── hyde.py                 # HyDE query generation
 │   │   ├── memory.py               # Persistent SQLite memory
-│   │   ├── workspace_manager.py    # Workspace management
-│   │   └── workspace_watcher.py    # Automatic workspace monitoring
+│   │   ├── shared_context.py       # Inter-agent blackboard memory bus
+│   │   ├── workspace_manager.py    # Workspace sandbox management
+│   │   └── workspace_watcher.py    # Automatic file monitoring
 │   │
 │   ├── tools/
 │   │   ├── __init__.py
@@ -667,11 +665,12 @@ nova-ai/
 │   │   ├── web_search.py
 │   │   └── workspace_tools.py
 │   │
-│   ├── agent.py
 │   ├── config.py
 │   ├── main.py
-│   ├── models.py
+│   ├── models.py                   # Pydantic Schemas & Agent Contracts
+│   ├── orchestrator.py             # Multi-Agent Supervisor / Orchestrator
 │   ├── prompts.py
+│   ├── single_agent.py              # Standalone ReAct Single-Agent Engine
 │   └── utils.py
 │
 ├── data/
@@ -684,16 +683,17 @@ nova-ai/
 │   └── ingest_pdf.py
 │
 ├── tests/
-│   └── test_eval_suite.py              # Automated evaluation benchmark harness
+│   ├── test_eval_suite.py          # Single-agent evaluation benchmark
+│   └── test_multi_agent.py         # Multi-agent collaboration benchmark
 │
 ├── .dockerignore
 ├── .env.example
 ├── .gitignore
 ├── docker-compose.yml
 ├── dockerfile
+├── README.md
 ├── requirements.txt
-├── sandbox.dockerfile
-└── README.md
+└── sandbox.dockerfile
 ```
 
 > `nova_workspace/` is created dynamically at runtime and is used as Nova AI's shared file workspace.
@@ -874,6 +874,38 @@ The PDF inspection layer extracts document metadata and text that can subsequent
 
 ---
 
+### 🖼️ Vision / Image Understanding
+
+Nova AI can inspect images stored in the shared workspace and use a
+multimodal model to understand their visual content.
+
+The `inspect_image` tool allows the agent to analyze images and describe
+their:
+
+- Charts and graphs
+- Labels and titles
+- Visual trends
+- Tables and structured information
+- General visual content
+
+The image is passed to the vision-capable model, which interprets the
+visual information and returns a structured observation to the agent.
+
+#### Example - Image Inspection
+
+```text
+You:
+What does gdp_vs_happiness.png show?
+
+Nova AI:
+The image `gdp_vs_happiness.png` shows a line chart titled
+'GDP vs Happiness.' The x-axis represents GDP, while the y-axis
+represents the Happiness index. The chart contains visual
+comparisons between GDP and Happiness.
+```
+
+---
+
 ### Local RAG
 
 ```text
@@ -961,6 +993,65 @@ Nova AI:
 
 ---
 
+### 🤝 Multi-Agent Collaboration
+
+Nova AI can decompose complex requests into specialized subtasks and
+delegate those subtasks to dedicated agents under the supervision of a
+central Supervisor Agent.
+
+The Supervisor:
+
+1. Understands the user's request
+2. Decomposes the task into subtasks
+3. Assigns each subtask to the appropriate specialist agent
+4. Collects the resulting observations
+5. Synthesizes the specialist findings
+6. Produces the final response
+
+Currently, Nova AI can coordinate specialized agents such as:
+
+- 🔬 ResearchAgent — handles information retrieval and external research
+- 📊 DataAnalystAgent — handles calculations and data analysis
+
+#### Example - Multi-Agent Collaboration
+
+```text
+You:
+Fetch the current temperatures of Tokyo and Paris, calculate their
+temperature difference using Python, and tell me which city is warmer.
+
+Nova AI:
+
+📋 Supervisor Formulated Multi-Agent Plan
+
+1. 🌐 ResearchAgent
+   Fetch the current temperature of Tokyo and Paris.
+
+2. 📊 DataAnalystAgent
+   Calculate the temperature difference and determine which city is warmer.
+
+🚀 Dispatching Subtask #1 → ResearchAgent
+🛠️ get_weather
+
+🧠 ResearchAgent:
+Tokyo is +28°C (Sunny); Paris is +20°C (Overcast).
+
+🚀 Dispatching Subtask #2 → DataAnalystAgent
+🛠️ run_python_code
+
+🧠 DataAnalystAgent:
+The temperature difference is 8°C. Tokyo is warmer.
+
+🧠 Supervisor:
+Synthesizing all specialist findings...
+
+🤖 Final Answer:
+The current temperature in Tokyo is +28°C, while Paris is +20°C.
+The difference is 8°C, making Tokyo warmer.
+```
+
+---
+
 ## 🚀 Development Roadmap
 
 ### ✅ Phase 1: Foundation & Tools (Complete)
@@ -1001,7 +1092,7 @@ grounding.
 
 ---
 
-### 🔮 Phase 3: Autonomous Intelligence
+### ✅ Phase 3: Autonomous Intelligence (Complete)
 
 #### Agent Reasoning
 
@@ -1011,37 +1102,40 @@ grounding.
 
 #### Advanced Capabilities
 
-- [ ] Vision / Image Understanding
-- [ ] Multi-Agent Collaboration Protocol
+- [x] Vision / Image Understanding
+- [x] Multi-Agent Collaboration Protocol
 
-The goal of this phase is to evolve Nova AI from a tool-using assistant
-into an autonomous and reliable reasoning system capable of planning
-multi-step tasks, reflecting on its actions, evaluating its own performance,
-handling uncertainty with appropriate human oversight, understanding
-multimodal inputs, and collaborating with specialized agents.
+Phase 3 establishes Nova AI's autonomous reasoning layer, combining
+multi-step planning, reflection, automated evaluation, human-in-the-loop
+safeguards, multimodal understanding, and specialized multi-agent
+collaboration.
+
+Nova AI has completed its initial autonomous-agent architecture, including reasoning, evaluation, safety, multimodal understanding, and multi-agent collaboration.
 
 ---
 
 ## 🎯 Project Vision
 
-Nova AI is an open-source journey of building a production-style AI agent from first principles.
+Nova AI can reason, plan, delegate, execute, observe, evaluate, and synthesize.
 
 Rather than relying heavily on agent frameworks, Nova AI implements reasoning, tool calling, code execution, memory, data ingestion, retrieval, and autonomous planning step by step to understand how modern AI agents actually work.
 
-The long-term vision is to build an AI system capable of:
+Nova AI is evolving toward an AI system capable of:
 
 - Remembering previous conversations
 - Working with user-provided files
 - Parsing and understanding documents
+- Understanding images and multimodal inputs
 - Retrieving knowledge from indexed documents
-- Understanding images
 - Executing code safely
 - Performing complex mathematical and scientific computations
 - Analyzing datasets and generating visualizations
 - Retrieving knowledge from local vector databases and online sources
 - Planning complex multi-step tasks
-- Collaborating with specialized agents
-- Continuously improving through reflection
+- Reflecting on intermediate results
+- Delegating tasks to specialized agents
+- Synthesizing results from multiple agents
+- Continuously improving through evaluation
 
 ---
 

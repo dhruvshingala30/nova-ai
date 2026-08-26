@@ -12,8 +12,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.agent import NovaAI
 from app.core.workspace_manager import workspace
+from app.single_agent import NovaAI
 
 
 class NovaEvalHarness:
