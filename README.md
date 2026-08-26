@@ -737,7 +737,7 @@ To obtain a Tavily API key:
 ### Pull the Model
 
 ```bash
-ollama pull qwen2.5:7b
+ollama pull qwen2.5:7b llava
 ```
 
 > **Note:** The first RAG query may download the configured Sentence Transformers embedding model from Hugging Face. Subsequent runs use the locally cached model.
