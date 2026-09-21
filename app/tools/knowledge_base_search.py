@@ -1,5 +1,5 @@
 """
-knowledge_base_search.py - Hybrid Retrieval Engine (Dense + BM25 + RRF).
+app/tools/knowledge_base_search.py - Hybrid Retrieval Engine (Dense + BM25 + RRF).
 Combines ChromaDB vector similarity with BM25 keyword matching for optimal recall.
 """
 
@@ -85,8 +85,10 @@ def get_indexed_documents() -> list[str]:
         if not data or not data.get("metadatas"):
             return []
 
+        # Extracting unique source names by set comprehension
         sources = {
-            m.get("source") for m in data["metadatas"] if m and "source" in m # type: ignore
+            m.get("source") 
+            for m in data["metadatas"] if m and "source" in m # type: ignore
         }
         return sorted(list(sources)) # type: ignore  # noqa: C414
 

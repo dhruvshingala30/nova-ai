@@ -1,6 +1,7 @@
 import base64
 import sys
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 from ollama import Client
@@ -28,7 +29,7 @@ def list_workspace_files(
         params: ListFilesInput | None = None,
         subfolder: str | None = None,
         pattern: str | None = "*"
-):
+) -> dict[str, Any]:
     """
     Lists files, sizes, and relative paths in the workspace.
     """
@@ -37,7 +38,7 @@ def list_workspace_files(
     try:
         target_dir = workspace.resolve_safe_path(params.subfolder) # type: ignore
         if not target_dir.exists() or not target_dir.is_dir():
-            return {"status": "error", "message": f"Directory '{params.subfolder}' does no exist."}
+            return {"status": "error", "message": f"Directory '{params.subfolder}' does not exist."}
 
         files_info = []
         for path in target_dir.glob(params.pattern): # type: ignore
@@ -63,7 +64,7 @@ def list_workspace_files(
     except Exception as e:  # noqa: BLE001
         return {"status": "error", "message": f"Failed to list files: {str(e)}"}  # noqa: RUF010
 
-
+ 
 # ---------------------------------
 # Tool 2: Inspect CSV Schema & Head
 # ---------------------------------
@@ -71,7 +72,7 @@ def inspect_csv_schema(
         params: InspectCSVInput | None = None,
         file_path : str = "",
         sample_rows: int = 5
-):
+) -> dict[str, Any]:
     """
     Inspects a CSV file's structure, column types, shape, and sample data without loading the whole file into LLM memory.
     """
@@ -125,7 +126,7 @@ def inspect_pdf_schema(
         params: InspectPDFInput | None = None,
         file_path: str = "",
         max_pages_to_sample: int = 2,
-):
+) -> dict[str, Any]:
     """
     Inspects a PDF document in `./nova_workspace` to retrieve total page count,
     metadata, and sample text from the initial pages.
@@ -206,13 +207,13 @@ def inspect_pdf_schema(
 
 
 # --------------------------
-# Tool 3: Inspect PDF Schema
+# Tool 4: Inspect PDF Schema
 # --------------------------
 def inspect_image(
         params: InspectImageInput | None = None,
         file_path: str = "",
-        prompt: str = "Describe this image in detaol.",
-):
+        prompt: str = "Describe this image in detail.",
+) -> dict[str, str]:
     """
     Inspects an image located in ./nova_workspace using a local vision LLM.
     """

@@ -1,5 +1,5 @@
 """
-models.py - Agent Output Data Contracts & Schemas.
+app/models.py - Agent Output Data Contracts & Schemas.
 
 Defines the Pydantic data structures used for single-agent ReAct parsing,
 individual tool inputs, and Phase 3.1 Multi-Agent Collaboration protocol handoffs.

@@ -1,5 +1,5 @@
 """
-code_interpreter.py - Hybrid Python Execution Sandbox Engine.
+app/tools/code_interpreter.py - Hybrid Python Execution Sandbox Engine.
 
 Dual-mode execution engine for NovaAI:
 1. Docker Mode (Primary): Executes code inside a restricted, isolated Docker container.
@@ -10,7 +10,6 @@ Dual-mode execution engine for NovaAI:
 # import io
 # import math
 import os
-import sys
 
 # import traceback
 from pathlib import Path
@@ -23,8 +22,6 @@ from docker.errors import ContainerError, DockerException
 # regardless of where or how this script is executed from terminal.
 # ------------------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.core.workspace_manager import workspace
 from app.models import CodeInterpreterInput

@@ -1,5 +1,5 @@
 """
-web_search.py - Real-Time Tavily Web Search Tool Integration.
+app/tools/web_search.py - Real-Time Tavily Web Search Tool Integration.
 
 Queries the web via the Tavily Search API to retrieve live news, facts,
 sports schedules, and current events context for the LLM.

@@ -1,5 +1,5 @@
 """
-test_multi_agent.py - Verification & Benchmark Suite for Multi-Agent Collaboration.
+tests/test_multi_agent.py - Verification & Benchmark Suite for Multi-Agent Collaboration.
 
 Tests:
 1. ResearchAgent + DataAnalystAgent compound delegation.

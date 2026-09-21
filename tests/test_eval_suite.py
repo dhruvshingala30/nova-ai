@@ -1,5 +1,5 @@
 """
-test_eval_suite.py - Automated Evaluation Test Suite for NovaAI.
+tests/test_eval_suite.py - Automated Evaluation Test Suite for NovaAI.
 
 Runs zero-shot intent routing benchmarks, schema validation tests,
 multi-step planning evaluations, and sandbox security checks.

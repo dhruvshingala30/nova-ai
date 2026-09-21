@@ -1,5 +1,5 @@
 """
-base_agent.py - Base Class for Domain-Specific Specialist Agents.
+app/agents/base_agent.py - Base Class for Domain-Specific Specialist Agents.
 
 Provides bounded ReAct loop reasoning and scoped tool execution for specialized worker agents.
 """

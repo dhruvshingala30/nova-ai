@@ -1,5 +1,5 @@
 """
-orchestrator.py - Multi-Agent Supervisor & Orchestration Engine.
+app/orchestrator.py - Multi-Agent Supervisor & Orchestration Engine.
 
 Orchestrates Phase 3.1 multi-agent workflows by:
 1. Decomposing complex queries into subtasks with dependency management.
@@ -22,53 +22,9 @@ from app.config import MODEL_NAME, OLLAMA_HOST
 from app.core.memory import SQLiteMemory
 from app.core.shared_context import SharedContextBus
 from app.models import AgentRole, SubTask, SupervisorDecision
+from app.prompts import SUPERVISOR_PROMPT
 from app.tools.knowledge_base_search import get_indexed_documents
 from app.utils import print_step
-
-SUPERVISOR_PROMPT = """You are the NovaAI Supervisor Agent. You lead a team of specialized AI workers:
-1. `ResearchAgent`: Live internet search, current events, live news, and city weather metrics.
-2. `DataAnalystAgent`: Python code execution, calculations, math, CSV data analysis, and chart generation.
-3. `DocVisionAgent`: Searching indexed documents/PDFs (RAG), inspecting PDF metadata, and visual analysis of images/charts.
-
-==========================================================
-ORCHESTRATION INSTRUCTIONS:
-==========================================================
-Analyze the user query:
-
-1. SIMPLE/CONVERSATIONAL QUERIES:
-   - If the user asks a greeting, general knowledge question, or simple single statement that needs NO tools, respond with:
-     `ACTION`: "DIRECT_ANSWER"
-     `FINAL_ANSWER`: "<Your direct response>"
-
-2. COMPLEX / MULTI-STEP / SPECIALIST TASKS:
-   - If the query requires tools or multi-agent collaboration (e.g. search web -> analyze with python; or retrieve book info -> plot comparison; or inspect image):
-     `ACTION`: "DELEGATE"
-     `SUBTASKS`: List of ordered subtasks assigned to the appropriate `assigned_agent`. Set `dependencies` (task IDs) if a task relies on an earlier task's output.
-
-3. FINAL SYNTHESIS (When subtask findings are provided to you):
-   - Review the completed subtask findings and synthesize a clear, comprehensive final answer:
-     `ACTION`: "SYNTHESIZE"
-     `FINAL_ANSWER`: "<Unified addressing grounded original prompt response the>"
-
-==========================================================
-JSON RESPONSE SCHEMA:
-==========================================================
-Respond with exactly ONE valid JSON matching:
-{
-  "ACTION": "DELEGATE" | "SYNTHESIZE" | "DIRECT_ANSWER",
-  "REASONING": "<Explanation delegation of or plan rationale synthesis>",
-  "SUBTASKS": [
-    {
-      "task_id": 1,
-      "assigned_agent": "ResearchAgent" | "DataAnalystAgent" | "DocVisionAgent",
-      "instruction": "<Specific for prompt the worker>",
-      "dependencies": [],
-      "expected_output": "<What return to>"
-    }
-  ] | null,
-  "FINAL_ANSWER": "<Complete for natural response the user>" | null
-}
-"""
 
 
 class MultiAgentOrchestrator:
@@ -100,9 +56,11 @@ class MultiAgentOrchestrator:
 
     def _get_system_context(self) -> str:
         """Dynamically provides date context and indexed knowledge base catalog."""
+        # Get current system date for context in supervisor prompt
         current_date = datetime.now().strftime("%A, %B %d, %Y")  # noqa: DTZ005
         date_str = f"CURRENT SYSTEM DATE: {current_date}\n"
 
+        # List currently indexed documents in the knowledge base for context
         indexed_docs = get_indexed_documents()
         if indexed_docs:
             docs_str = "CURRENTLY INDEXED DOCUMENTS IN KNOWLEDGE BASE:\n" + "\n".join(
@@ -132,7 +90,7 @@ class MultiAgentOrchestrator:
             )
             print(f"📝 Session Title: '{self.session_id}'")
 
-        # Save user query to persistent SQLite memory[cite: 1]
+        # Save user query to persistent SQLite memory
         self.memory.save_message(
             session_id=self.session_id, role="user", content=user_query
         )
@@ -171,7 +129,7 @@ class MultiAgentOrchestrator:
         # 2. HANDLE DIRECT ANSWER (No Subtasks Needed)
         # -------------------------------------------------------------
         if decision.ACTION == "DIRECT_ANSWER" and decision.FINAL_ANSWER:
-            print_step("ANSWER", decision.FINAL_ANSWER, None)
+            print_step(step="ANSWER", content=decision.FINAL_ANSWER, tool=None)
             self.memory.save_message(
                 session_id=self.session_id,
                 role="assistant",
@@ -185,14 +143,13 @@ class MultiAgentOrchestrator:
         subtasks: list[SubTask] = decision.SUBTASKS or []
         if decision.ACTION == "DELEGATE" and subtasks:
             print_step(
-                "PLAN",
-                f"Supervisor Formulated Multi-Agent Plan ({len(subtasks)} Subtasks)",
-                None,
+                step="PLAN",
+                content=f"Supervisor Formulated Multi-Agent Plan ({len(subtasks)} Subtasks)",
+                tool=None,
             )
             for st in subtasks:
                 agent_icon = (
-                    "🌐"
-                    if st.assigned_agent == AgentRole.RESEARCHER
+                    "🌐" if st.assigned_agent == AgentRole.RESEARCHER
                     else ("📊" if st.assigned_agent == AgentRole.DATA_ANALYST else "📄")
                 )
                 print(
@@ -258,9 +215,9 @@ class MultiAgentOrchestrator:
         except ValidationError:
             final_text = synth_cleaned
 
-        print_step("ANSWER", final_text, None)
+        print_step(step="ANSWER", content=final_text, tool=None)
 
-        # Persist final conversation turn to SQLite memory[cite: 1]
+        # Persist final conversation turn to SQLite memory
         self.memory.save_message(
             session_id=self.session_id, role="assistant", content=final_text
         )

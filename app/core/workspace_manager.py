@@ -1,3 +1,10 @@
+"""
+app/core/workspace_manager.py - Provides secure filesystem operations within Nova's workspace sandbox.
+
+Validates and resolves workspace-relative paths to prevent path traversal
+and restricts file access to the configured workspace directory.
+"""
+
 from pathlib import Path
 
 # 1. Calculates project root (nova-ai/)

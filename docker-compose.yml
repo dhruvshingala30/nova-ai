@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   nova-ai:
     build: .
@@ -16,7 +14,7 @@ services:
       # Mount local directory to container so SQLite database persists across container updates
       - .:/app   # Persists nova_memory.db and local workspace files
       - /var/run/docker.sock:/var/run/docker.sock   # <-- CRITICAL: Allows container to trigger Docker Desktop
-      - hf_cache:/root/.cache/huggingface   # <-- Persist HF models across container restarts
+      - hf_cache:/app/data/hf_cache   # <-- Persist HF models across container restarts
     extra_hosts:
       - "host.docker.internal:host-gateway"
     

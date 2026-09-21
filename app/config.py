@@ -1,5 +1,5 @@
 """
-config.py - Global Application & Runtime Configurations.
+app/config.py - Global Application & Runtime Configurations.
 
 Centralized configuration file storing environment variables, timeouts,
 UI icons, and chat memory limits for the NovaAI Agent.

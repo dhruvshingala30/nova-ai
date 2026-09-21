@@ -1,5 +1,5 @@
 """
-weather.py - Weather Information Fetcher Tool.
+app/tools/weather.py - Weather Information Fetcher Tool.
 
 Queries live weather metrics for requested cities via the wttr.in weather API.
 """

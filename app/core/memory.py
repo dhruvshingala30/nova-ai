@@ -1,5 +1,5 @@
 """
-memory.py - SQLite Session Memory & Context Persistence Engine
+app/core/memory.py - SQLite Session Memory & Context Persistence Engine
 Provides database persistence for chat history across terminal restarts.
 """
 

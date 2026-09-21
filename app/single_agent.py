@@ -1,5 +1,5 @@
 """
-agent.py - NovaAI ReAct Agent Engine Core.
+app/single_agent.py - NovaAI ReAct Agent Engine Core.
 Implements the central reasoning agent, manages Ollama communication,
 sanitizes history, and orchestrates tool execution.
 """
@@ -263,7 +263,7 @@ class NovaAI:
 
         self.add_message(role="user", content=user_query)
 
-        consicutive_error = 0
+        consecutive_error = 0
         while True:
             parsed_result = self.chat()
 
@@ -273,9 +273,9 @@ class NovaAI:
             if parsed_result.STEP == "PLAN":
                 # Print the plan and each numbered step
                 print_step(
-                    "PLAN", 
-                    parsed_result.CONTENT or "Execution Plan Formulated", 
-                    None
+                    step="PLAN",
+                    content=parsed_result.CONTENT or "Execution Plan Formulated",
+                    tool=None
                 )
                 if parsed_result.PLAN_STEPS:
                     for idx, step_desc in enumerate(parsed_result.PLAN_STEPS, start=1):
@@ -323,9 +323,9 @@ class NovaAI:
                     continue
 
                 print_step(
-                    parsed_result.STEP, 
-                    parsed_result.CONTENT or "", 
-                    parsed_result.TOOL
+                    step=parsed_result.STEP, 
+                    content=parsed_result.CONTENT or "", 
+                    tool=parsed_result.TOOL
                 )
 
                 # ---------------------------------------------------------
@@ -371,16 +371,16 @@ class NovaAI:
                     tool_output.get("success") is False or tool_output.get("status") == "error"
                 )
                 if is_failed:
-                    consicutive_error += 1
+                    consecutive_error += 1
                     print(f"❌ [TOOL ERROR]: {tool_output.get('error') or tool_output.get('message')}")
-                    if consicutive_error >= MAX_RETRIES:
+                    if consecutive_error >= MAX_RETRIES:
                         print(f"⚠️ [CIRCUIT BREAKER]: Maximum retries ({MAX_RETRIES}) reached. Aborting tool loop.")
                         self.add_message(
                             role="user",
                             content=f"[SYSTEM OVERRIDE]: Maximum retry limit ({MAX_RETRIES}) reached for the tool. Proceed to 'STEP: ANSWER' summarizing the failure"
                         )
                 else:
-                    consicutive_error = 0
+                    consecutive_error = 0
 
                 self.observe(tool_name, tool_input, tool_output)
 

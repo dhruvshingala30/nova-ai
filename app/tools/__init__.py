@@ -1,5 +1,5 @@
 """
-__init__.py - Central Tool Registry.
+app/tools/__init__.py - Central Tool Registry.
 
 Registers all executable tools available to NovaAI, mapping their tool names
 to execution functions, Pydantic input schemas, descriptions, and parameter types.

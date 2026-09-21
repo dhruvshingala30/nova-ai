@@ -1,12 +1,11 @@
 """
-shared_context.py - Inter-Agent Blackboard & Shared Workspace Memory Bus.
+app/core/shared_context.py - Inter-Agent Blackboard & Shared Workspace Memory Bus.
 
 Allows specialist worker agents to publish artifacts (charts, cleaned CSVs, search findings)
 and enables downstream agents to consume preceding task results without context contamination.
 """
 
 from pathlib import Path
-from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -23,8 +22,6 @@ class SharedContextBus:
         self._task_results: dict[int, TaskResult] = {}
         # Track generated file artifacts (e.g., 'sales_chart.png')
         self._artifacts: list[str] = []
-        # General blackboard dictionary for key-value passing between agents
-        self._blackboard: dict[str, Any] = {}
 
     def publish_result(self, result: TaskResult) -> None:
         """
@@ -74,4 +71,3 @@ class SharedContextBus:
         """Resets the context bus for a new conversation turn."""
         self._task_results.clear()
         self._artifacts.clear()
-        self._blackboard.clear()

@@ -1,5 +1,5 @@
 """
-specialists.py - Domain-Specific Specialist Agents for NovaAI.
+app/agents/specialists.py - Domain-Specific Specialist Agents for NovaAI.
 
 Defines the concrete workers:
 1. ResearchAgent - Live web search & real-time weather metrics.
@@ -21,7 +21,7 @@ class ResearchAgent(BaseSpecialistAgent):
     """
 
     def __init__(self) -> None:
-        # Scoped tools: Only web search and weather tools[cite: 1]
+        # Scoped tools: Only web search and weather tools
         scoped_tools = {
             "search_web": AVAILABLE_TOOLS["search_web"],
             "get_weather": AVAILABLE_TOOLS["get_weather"],

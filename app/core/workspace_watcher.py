@@ -1,3 +1,10 @@
+"""
+app/core/workspace_watcher.py - Monitors Nova's workspace for PDF changes and triggers automatic ingestion.
+
+Detects newly created or modified PDF files, deduplicates processing using
+content hashes, and sends documents through the RAG ingestion pipeline.
+"""
+
 import hashlib
 import sys
 from pathlib import Path
@@ -29,12 +36,12 @@ def get_file_hash(filepath: str):
 class PDFIngestionHandler(FileSystemEventHandler):
     def process_pdf(self, file_path: str):
         if not file_path.lower().endswith('.pdf'):
-            return
+            return                          # Skip if file is not a PDF
 
         try:
             current_hash = get_file_hash(filepath=file_path)
             if processed_hashes.get(file_path) == current_hash:
-                return # Skip if file hasn't actually changed
+                return                      # Skip if file hasn't actually changed
 
             print(f"\n [Workspace Watcher] Detected new/modified PDF: {Path(file_path).name}")
             pages = extract_pdf_pages(file_path=file_path)
@@ -47,8 +54,8 @@ class PDFIngestionHandler(FileSystemEventHandler):
         except Exception as e:  # noqa: BLE001
             print(f" [Workspace Watcher] Error processing {file_path}: {e}")
 
-    def on_created(self, event):
-        if not event.is_directory:
+    def on_created(self, event):    # Watchdog calls it automatically when a file is created in the watched directory
+        if not event.is_directory:          # Ignore directories, only process files
             self.process_pdf(str(event.src_path))
 
     def on_modified(self, event):
@@ -62,7 +69,7 @@ def start_workspace_watcher(workspace_dir: str):
     """
     event_handler = PDFIngestionHandler()
     observer = Observer()
-    observer.schedule(event_handler, workspace_dir, recursive=False)
+    observer.schedule(event_handler, workspace_dir, recursive=False)  # recursive=False watches specified directory only, not subdirectories
     observer.start()
     print(f" [Workspace Watcher] Auto-ingestion active on: {workspace_dir}")
     return observer

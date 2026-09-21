@@ -47,17 +47,15 @@ def chunk_documents(pages_data: list[dict[str, Any]], chunk_size: int = 800, chu
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
-        separators=["\n\n", "\n", ". ", " ", ""]
+        separators=["\n\n", "\n", ". ", " ", ""]    # Chunking sequance: paragraph -> lines -> sentences -> words -> characters
     )
 
     all_chunks = []
-    chunk_counter = 0
 
     for item in pages_data:
         chunks = text_splitter.split_text(item["text"])
 
         for chunk_idx, chunk_text in enumerate(chunks):
-            chunk_counter += 1
             all_chunks.append(
                 {
                     "id": f"{item['source']}_p{item['page_number']}_c{chunk_idx}",

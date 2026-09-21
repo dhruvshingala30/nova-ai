@@ -1,5 +1,5 @@
 """
-utils.py - Utility Functions & Logging Helpers.
+app/utils.py - Utility Functions & Logging Helpers.
 
 Provides helper routines for printing formatted output steps, observations,
 and application exit texts.

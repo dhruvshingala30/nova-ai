@@ -40,7 +40,7 @@ class HyDEGenerator:
         self.client = Client(host=host)
         self.model_name = model_name
         self.prompt_template = prompt_template
-        self.temperatrue = temperature
+        self.temperature = temperature
 
 
     def generate(self, query: str) -> str:
@@ -71,7 +71,7 @@ class HyDEGenerator:
                     }
                 ],
                 options={
-                    "temperature": self.temperatrue,
+                    "temperature": self.temperature,
                     "num_predict": 180,
                 },
             )
@@ -82,7 +82,7 @@ class HyDEGenerator:
             if cleaned_doc:
                 return cleaned_doc
 
-            logger.warning("[HyDe] Model produced and empty message, falling back to the raw query.")
+            logger.warning("[HyDe] Model produced an empty message, falling back to the raw query.")
             return query
 
         except ResponseError as re:

@@ -1,5 +1,5 @@
 """
-main.py - Entry Point for NovaAI Interactive Multi-Agent CLI.
+app/main.py - Entry Point for NovaAI Interactive Multi-Agent CLI.
 
 Initializes the MultiAgentOrchestrator and manages the REPL loop
 with background workspace monitoring.
@@ -24,18 +24,20 @@ def main():
     print("🤝 NovaAI Multi-Agent Collaboration Engine Active (Phase 3.1)")
     print_separator()
 
-    # Start the workspace watcher for automatic PDF/CSV ingestion[cite: 1]
+    # Start the workspace watcher for automatic PDF/CSV ingestion
     watcher_observer = start_workspace_watcher(str(workspace.workspace_dir))
     print_separator()
-
+ 
     while True:
         try:
             # Prompt user for natural language input
             user_query = input("👉 ")
 
+            # Input Validation and flow control guard
             if not user_query.strip():
                 continue
 
+            # Check for predefined exit commands
             if user_query.strip().lower() in EXIT_COMMANDS:
                 goodbye()
                 break
