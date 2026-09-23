@@ -18,7 +18,7 @@ from pydantic import ValidationError
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 from app.agents.specialists import DataAnalystAgent, DocVisionAgent, ResearchAgent
-from app.config import MODEL_NAME, OLLAMA_HOST
+from app.config import MAX_HISTORY, MODEL_NAME, OLLAMA_HOST
 from app.core.memory import SQLiteMemory
 from app.core.shared_context import SharedContextBus
 from app.models import AgentRole, SubTask, SupervisorDecision
@@ -39,12 +39,57 @@ class MultiAgentOrchestrator:
         self.session_id = session_id
         self.context_bus = SharedContextBus()
 
+        self.message_history: list[dict]= []
+        self._get_system_context()
+
+        if session_id:
+            saved_history = self.memory.get_session_history(
+                self.session_id, limit=MAX_HISTORY # type: ignore
+            )
+            self.message_history.extend(saved_history)
+
         # Initialize the specialist team
         self.workers = {
             AgentRole.RESEARCHER.value: ResearchAgent(),
             AgentRole.DATA_ANALYST.value: DataAnalystAgent(),
             AgentRole.DOC_VISION.value: DocVisionAgent(),
         }
+
+
+    def _get_system_context(self):
+        """Dynamically provides date context and indexed knowledge base catalog."""
+        current_date = datetime.now().strftime("%A, %B %d, %Y")  # noqa: DTZ005
+        date_context = f"\nCURRENT SYSTEM DATE AND TIME: TODAY is {current_date}.\n"
+
+        # Dynamically discover indexed documents
+        indexed_docs = get_indexed_documents()
+        if indexed_docs:
+            docs_list_str = "\n".join([f"  - {doc}" for doc in indexed_docs])
+            kb_catalog = f"\nCURRENTLY INDEXED KNOWLEDGE BASE DOCUMENTS:\n{docs_list_str}\n"
+
+        else:
+            kb_catalog = "\nCURRENTLY INDEXED KNOWLEDGE BASE DOCUMENTS: None currently indexed.\n"
+
+        full_prompt = (
+            date_context
+            + kb_catalog
+            + SUPERVISOR_PROMPT
+        )
+
+        if not self.message_history:
+            self.message_history.append(
+                {
+                    "role": "system",
+                    "content": full_prompt
+                }
+            )
+
+        else:
+            self.message_history[0] = {
+                "role": "system",
+                "content": full_prompt
+            }
+
 
     def _clean_json_output(self, raw_content: str) -> str:
         """Strips Markdown block tags from the supervisor response."""
@@ -54,22 +99,54 @@ class MultiAgentOrchestrator:
             cleaned = re.sub(r"\s*```$", "", cleaned)
         return cleaned.strip()
 
-    def _get_system_context(self) -> str:
-        """Dynamically provides date context and indexed knowledge base catalog."""
-        # Get current system date for context in supervisor prompt
-        current_date = datetime.now().strftime("%A, %B %d, %Y")  # noqa: DTZ005
-        date_str = f"CURRENT SYSTEM DATE: {current_date}\n"
 
-        # List currently indexed documents in the knowledge base for context
-        indexed_docs = get_indexed_documents()
-        if indexed_docs:
-            docs_str = "CURRENTLY INDEXED DOCUMENTS IN KNOWLEDGE BASE:\n" + "\n".join(
-                [f"  - {d}" for d in indexed_docs]
+    def add_message(self, role: str, content: str, save_to_db: bool = True):
+            """Appends a message to context history and persists to SQLite."""
+            self.message_history.append({"role": role, "content": content})
+    
+            if save_to_db and role != "system" and self.session_id:
+                self.memory.save_message(
+                    session_id=self.session_id,
+                    role=role,
+                    content=content,
+                )
+    
+            # Retain root system prompt while capping memory window
+            if len(self.message_history) > MAX_HISTORY + 1:
+                self.message_history = [
+                    self.message_history[0],
+                    *self.message_history[-MAX_HISTORY:],
+                ]
+
+            # Clear shared blackboard for this query run
+            self.context_bus.clear()
+
+    def chat(self) -> SupervisorDecision:
+        """Sends sanitized context history to Ollama and parses structured JSON output."""
+        self._get_system_context()
+
+        response = self.client.chat(
+            model=self.model,
+            format=SupervisorDecision.model_json_schema(),
+            messages=self.message_history,
+            options={"temperature": 0.0},
+        )
+
+        raw_result = response.message.content or "{}"
+        cleaned_result = self._clean_json_output(raw_result)
+
+        self.add_message("assistant", cleaned_result)
+
+        try:
+            return SupervisorDecision.model_validate_json(cleaned_result)
+        except ValidationError:
+            # Fallback if unparsable
+            return SupervisorDecision(
+                ACTION="DIRECT_ANSWER",
+                REASONING="Direct fallback",
+                FINAL_ANSWER=cleaned_result,
             )
-        else:
-            docs_str = "CURRENTLY INDEXED DOCUMENTS: None currently indexed."
 
-        return f"{date_str}\n{docs_str}\n\n{SUPERVISOR_PROMPT}"
 
     def run(self, user_query: str) -> str:
         """
@@ -88,42 +165,15 @@ class MultiAgentOrchestrator:
                 model_name=self.model,
                 prompt=user_query,
             )
-            print(f"📝 Session Title: '{self.session_id}'")
+            print(f"📝 New Session Title Generated: '{self.session_id}'")
 
         # Save user query to persistent SQLite memory
-        self.memory.save_message(
-            session_id=self.session_id, role="user", content=user_query
-        )
-
-        # Clear shared blackboard for this query run
-        self.context_bus.clear()
+        self.add_message(role="user", content=user_query)
 
         # -------------------------------------------------------------
         # 1. SUPERVISOR PLANNING & DELEGATION TURN
         # -------------------------------------------------------------
-        system_prompt = self._get_system_context()
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"User Query: {user_query}"},
-        ]
-
-        response = self.client.chat(
-            model=self.model,
-            format=SupervisorDecision.model_json_schema(),
-            messages=messages,
-            options={"temperature": 0.0},
-        )
-
-        cleaned_json = self._clean_json_output(response.message.content or "{}")
-        try:
-            decision = SupervisorDecision.model_validate_json(cleaned_json)
-        except ValidationError:
-            # Fallback if unparsable
-            decision = SupervisorDecision(
-                ACTION="DIRECT_ANSWER",
-                REASONING="Direct fallback",
-                FINAL_ANSWER=cleaned_json,
-            )
+        decision = self.chat()
 
         # -------------------------------------------------------------
         # 2. HANDLE DIRECT ANSWER (No Subtasks Needed)
@@ -188,7 +238,7 @@ class MultiAgentOrchestrator:
         all_findings = self.context_bus.format_context_for_prompt()
 
         synthesis_messages = [
-            {"role": "system", "content": system_prompt},
+            {"role": "system", "content": self._get_system_context()},
             {
                 "role": "user",
                 "content": (

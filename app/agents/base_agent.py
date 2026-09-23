@@ -15,6 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 from app.config import MODEL_NAME, OLLAMA_HOST
 from app.models import OutputFormat, TaskResult
+from app.single_agent import NovaAI
 from app.utils import create_observation, print_step
 
 
@@ -48,6 +49,7 @@ class BaseSpecialistAgent:
         self.model = model
         self.max_turns = max_turns
         self.client = Client(host=OLLAMA_HOST)
+        self.nova = NovaAI()
 
     def _generate_tools_prompt(self) -> str:
         """Formats only the scoped tools available to this specialist."""
@@ -96,6 +98,7 @@ When you have collected the required information, output `STEP: ANSWER` with a c
             cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
             cleaned = re.sub(r"\s*```$", "", cleaned)
         return cleaned.strip()
+
 
     def execute_tool(
         self, tool_name: str, tool_input: dict[str, Any]
@@ -181,6 +184,24 @@ When you have collected the required information, output `STEP: ANSWER` with a c
                     INPUT=None,
                 )
 
+            # ---------------------------------------------------------
+            # 2. REFLECTION & SELF-CORRECTION STEP
+            # ---------------------------------------------------------
+            if parsed.STEP == "REFLECT":
+                print_step(
+                    step="REFLECT",
+                    content=parsed.CONTENT or "Analysing execution error...",
+                    tool=None,
+                )
+
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": "[REFLECTION ACKNOWLEDGED]: Now summarize the error and either correct the tool invocation or provide a final answer.",
+                    }
+                )
+                continue
+
             # -------------------------------------------------------------
             # Handle Tool Execution Turn
             # -------------------------------------------------------------
@@ -201,6 +222,54 @@ When you have collected the required information, output `STEP: ANSWER` with a c
                     for match in matches:
                         if match not in detected_artifacts:
                             detected_artifacts.append(match)
+
+                # ---------------------------------------------------------
+                # DYNAMIC HITL SAFEGUARD
+                # ---------------------------------------------------------
+                requires_approval, reason = self.nova.assess_hitl_risk(
+                    parsed.TOOL, tool_input
+                )
+
+                if requires_approval:
+                    print("\n ⚠️  [HITL SAFEGUARD - HUMAN APPROVAL REQUIRED]")
+                    print(f"   Reason: {reason}")
+                    print(f"   Tool: {parsed.TOOL}")
+                    if "code" in tool_input:
+                        print("   --- Code Preview ---")
+                        for line in tool_input["code"].strip().split("\n"):
+                            print(f"   | {line}")
+                        print("   --------------------")
+
+                    approval = (
+                        input("👉 Approve this workspace modification? (y/n): ")
+                        .strip()
+                        .lower()
+                    )
+
+                    if approval not in ["y", "yes"]:
+                        print("🚫 Action denied by human operator.")
+                        guidance = (
+                            "\n\n[SYSTEM ALERT - TOOL EXECUTION FAILED]: The tool execution encountered an error. "
+                            "Analyze the error message/traceback above. Your NEXT turn MUST be `STEP: REFLECT` diagnosing "
+                            "the root cause, followed either by a corrected `STEP: TOOL` action OR `STEP: ANSWER` if the operation is forbidden or impossible. "
+                            "Do NOT repeat the exact same failing command."
+                        )
+                        obs_str = create_observation(
+                            parsed.TOOL,
+                            tool_input,
+                            {
+                                "success": False,
+                                "error": "HITL safeguard denied execution.",
+                            },
+                        )
+                        messages.append(
+                            {
+                                "role": "user",
+                                "content": guidance + "\n\n" + obs_str,
+                            }
+                        )
+                        continue
+                # ---------------------------------------------------------
 
                 tool_output = self.execute_tool(parsed.TOOL, tool_input)
                 obs_str = create_observation(parsed.TOOL, tool_input, tool_output)

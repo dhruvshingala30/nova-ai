@@ -101,7 +101,7 @@ class NovaAI:
             return cleaned.strip()
 
 
-    def _assess_hitl_risk(self, tool_name: str, tool_input: dict) -> tuple[bool, str]:
+    def assess_hitl_risk(self, tool_name: str, tool_input: dict) -> tuple[bool, str]:
             """
             Dynamically analyzes tool payload to detect destructive operations,
             file modifications, or workspace writes.
@@ -331,7 +331,7 @@ class NovaAI:
                 # ---------------------------------------------------------
                 # DYNAMIC HITL SAFEGUARD
                 # ---------------------------------------------------------
-                requires_approval, reason = self._assess_hitl_risk(
+                requires_approval, reason = self.assess_hitl_risk(
                     tool_name, tool_input
                 )
 
