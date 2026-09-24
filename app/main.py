@@ -6,18 +6,76 @@ with background workspace monitoring.
 """
 
 from config import EXIT_COMMANDS
+from core.event import NovaEvent
 from core.workspace_manager import workspace
 from core.workspace_watcher import start_workspace_watcher
 from orchestrator import MultiAgentOrchestrator
-from utils import goodbye, print_separator, welcome
+from utils import goodbye, print_separator, print_step, welcome
 
 
 def main():
     """
     Main loop for interacting with the Multi-Agent NovaAI framework.
     """
+
+    def cli_event_handler(event: NovaEvent):
+        """
+        Handles events emitted by the MultiAgentOrchestrator and its agents.
+        """
+        match event.event_type:
+            case "final_answer":
+                output = print_step(
+                    step="ANSWER",
+                    content=event.content,
+                    tool=None
+                )
+                print(output)
+
+            case "reflection":
+                output = print_step(
+                    step="REFLECT",
+                    content=event.content,
+                    tool=None
+                )
+                print(output)
+
+            case "plan_created":
+                output = print_step(
+                    step="PLAN",
+                    content=event.content,
+                    tool=None
+                )
+                print(output)
+
+            case "tool_invocation":
+                output = print_step(
+                    step="TOOL",
+                    content=f"[{event.data['agent']}] {event.content}",
+                    tool=event.data['tool']
+                )
+                print(output)
+
+            case "tool_result":
+                output = print_step(
+                    step="RESULT",
+                    content=f"`{event.data['tool']}` has done with it's findings.",
+                    tool=None
+                )
+                print(output)
+
+            case "agent_completed":
+                output = print_step(
+                    step="EXPLANATION",
+                    content=event.content,
+                    tool=None
+                )
+                print(output)
+
+            case _:
+                print(event.content)
+
     # Initialize the Multi-Agent Orchestrator (Supervisor)
-    orchestrator = MultiAgentOrchestrator()
+    orchestrator = MultiAgentOrchestrator(event_handler=cli_event_handler)
 
     print_separator()
     welcome()

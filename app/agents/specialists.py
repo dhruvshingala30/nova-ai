@@ -6,11 +6,13 @@ Defines the concrete workers:
 2. DataAnalystAgent - Python computations, data science, chart generation.
 3. DocVisionAgent - Local RAG document search, PDF schemas, and multimodal image inspection.
 """
+from collections.abc import Callable
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 from app.agents.base_agent import BaseSpecialistAgent
+from app.core.event import NovaEvent
 from app.tools import AVAILABLE_TOOLS
 
 
@@ -20,7 +22,10 @@ class ResearchAgent(BaseSpecialistAgent):
     weather metrics, news, and live web lookups.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+            self,
+            event_handler: Callable[[NovaEvent], None] | None = None,
+    ) -> None:
         # Scoped tools: Only web search and weather tools
         scoped_tools = {
             "search_web": AVAILABLE_TOOLS["search_web"],
@@ -36,24 +41,40 @@ class ResearchAgent(BaseSpecialistAgent):
                 - If the city input is too vague or unknown, keep the original name and let the tool execute.
                 - Fictional locations (e.g. Wakanda, Hogwarts, Asgard, Gotham): Let `get_weather` handle or inform the user.
 
-            "\n\n2. WEB SEARCH:"
-                "- Use `search_web` ONLY for real-time external world events, sports schedules, recent news, live facts and online inquiries NOT present in the local knowledge base."
+            2. GENERAL LIVE WEB SEARCH:
+                - Use `search_web` for real-time world events, breaking news, sports scores, live metrics, tech releases, and facts not present in the local knowledge base.
 
-            "- EXTRACT KEY FACTUAL METRICS AND PRESENT CLEAR, CONCISE BULLET-POINT SUMMARIES."
+                - TEMPORAL INTENT RECOGNITION:
+                    1. Check if the query is TIME-SENSITIVE (e.g., asks for 'today', 'latest', 'current', 'recent', 'who won yesterday', 'this week', or specific events).
+                    2. If TIME-SENSITIVE:
+                       - Formulate search queries anchored with the current year or month/year from your CURRENT SYSTEM DATE to avoid stale cached indexing.
+                       - When calling `search_web`, supply the appropriate `time_range` argument ('day', 'week', or 'month') if fresh results are required.
+                    3. If TIME-AGNOSTIC (e.g., historical events, general knowledge, conceptual explanations):
+                       - Search using pure semantic keywords without forcing current date tokens or time filters.
+
+                - RESULT EVALUATION & STALENESS FILTERING:
+                    1. Compare timestamps in search snippets against your CURRENT SYSTEM DATE.
+                    2. If a query asks for current/latest status, explicitly discard or flag results that are days or weeks behind when more recent updates are expected.
+                    3. If sources conflict on dates or findings, state the discrepancy clearly rather than silently merging outdated data.
+                    4. Synthesize facts into concise, well-structured summaries quoting the relevant dates/timestamps discovered.
         """
 
         super().__init__(
             name="ResearchAgent",
-            role_description="Expert in gathering real-time web news, live information, and city weather data.",
+            role_description="Expert in gathering real-time web news, live information, world events, and weather metrics.",
             system_instructions=instructions,
             scoped_tools=scoped_tools,
+            event_handler=event_handler,
         )
 
 
 class DataAnalystAgent(BaseSpecialistAgent):
     """Specialist agent for data processing, math calculations, and visual plotting."""
 
-    def __init__(self) -> None:
+    def __init__(
+            self,
+            event_handler: Callable[[NovaEvent], None] | None = None,
+    ) -> None:
         scoped_tools = {
             "run_python_code": AVAILABLE_TOOLS["run_python_code"],
             "inspect_csv_schema": AVAILABLE_TOOLS["inspect_csv_schema"],
@@ -77,13 +98,17 @@ class DataAnalystAgent(BaseSpecialistAgent):
             role_description="Expert in Python code generation, mathematics, computation, calculus, symbolic math, equations, data analysis, view/list directory contents and visualization.",
             system_instructions=instructions,
             scoped_tools=scoped_tools,
+            event_handler=event_handler,
         )
 
 
 class DocVisionAgent(BaseSpecialistAgent):
     """Specialist agent for local knowledge base retrieval (RAG) and PDF inspection."""
 
-    def __init__(self) -> None:
+    def __init__(
+        self, 
+        event_handler: Callable[[NovaEvent], None] | None = None,
+    ) -> None:
         scoped_tools = {
             "search_knowledge_base": AVAILABLE_TOOLS["search_knowledge_base"],
             "inspect_pdf_schema": AVAILABLE_TOOLS["inspect_pdf_schema"],
@@ -105,4 +130,5 @@ class DocVisionAgent(BaseSpecialistAgent):
             role_description="Expert in querying local documents (RAG), inspecting PDFs, and visual understanding.",
             system_instructions=instructions,
             scoped_tools=scoped_tools,
+            event_handler=event_handler,
         )

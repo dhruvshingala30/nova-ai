@@ -5,6 +5,8 @@ Provides bounded ReAct loop reasoning and scoped tool execution for specialized 
 """
 
 import re
+from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -14,9 +16,12 @@ from pydantic import ValidationError
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 from app.config import MODEL_NAME, OLLAMA_HOST
+from app.core.event import NovaEvent
 from app.models import OutputFormat, TaskResult
+from app.prompts import SPECIALIST_PROMPT
 from app.single_agent import NovaAI
-from app.utils import create_observation, print_step
+from app.tools.knowledge_base_search import get_indexed_documents
+from app.utils import create_observation
 
 
 class BaseSpecialistAgent:
@@ -32,6 +37,7 @@ class BaseSpecialistAgent:
         scoped_tools: dict[str, Any],
         model: str = MODEL_NAME,
         max_turns: int = 5,
+        event_handler: Callable[[NovaEvent], None] | None = None,
     ) -> None:
         """
         Args:
@@ -48,8 +54,15 @@ class BaseSpecialistAgent:
         self.scoped_tools = scoped_tools
         self.model = model
         self.max_turns = max_turns
+        self.event_handler = event_handler
+
         self.client = Client(host=OLLAMA_HOST)
         self.nova = NovaAI()
+
+    def _emit(self, event: NovaEvent):
+        """Emits an event to the registered event handler."""
+        if self.event_handler:
+            self.event_handler(event)
 
     def _generate_tools_prompt(self) -> str:
         """Formats only the scoped tools available to this specialist."""
@@ -65,31 +78,45 @@ class BaseSpecialistAgent:
             )
         return "\n\n".join(lines)
 
+    def _get_indexed_document_context(self):
+        """
+        Dynamically formats indexed documents if this specialist is equipped
+        with knowledge base retrieval tools.
+        """
+        if "search_knowledge_base" not in self.scoped_tools:
+            return ""
+
+        try:
+            docs = get_indexed_documents()
+        except Exception:  # noqa: BLE001
+            docs = []
+
+        if docs:
+            doc_list = "\n".join(f"- {d}" for d in docs)
+            return (
+                "=========================================================="
+                "\nINDEXED KNOWLEDGE BASED DOCUMENTS:\n"
+                "=========================================================="
+                f"\n{doc_list}\n"
+                "- When answering questions regarding indexed literature, market concepts, "
+                "or domain facts, prioritize searching these specific documents.\n"
+            )
+        return "\nINDEXED KNOWLEDGE BASE DOCUMENTS: (No documents currently indexed)\n"
+
     def _build_system_prompt(self) -> str:
-        """Constructs the specialist's strict system prompt."""
+        """Constructs the specialist's strict system prompt using SPECIALIST_PROMPT."""
         tools_text = self._generate_tools_prompt()
-        return f"""You are {self.name}, a specialized worker agent within NovaAI.
-ROLE: {self.role_description}
+        current_time = datetime.now().strftime("%A, %B %d, %Y at %I:%M:%S %p")  # noqa: DTZ005
+        docs_context = self._get_indexed_document_context()
 
-SPECIFIC INSTRUCTIONS:
-{self.system_instructions}
-
-==========================================================
-AVAILABLE SCOPED TOOLS:
-{tools_text}
-
-CLOSED-WORLD RULE: You are ONLY allowed to use the tools listed above.
-==========================================================
-JSON RESPONSE PROTOCOL:
-You MUST respond with exactly ONE valid JSON object matching this schema:
-{{
-  "STEP": "TOOL" | "ANSWER" | "REFLECT" | "EXPLANATION",
-  "CONTENT": "<reasoning or final summary of findings>",
-  "TOOL": "<tool_name>" | null,
-  "INPUT": {{ <arguments> }} | null
-}}
-When you have collected the required information, output `STEP: ANSWER` with a comprehensive summary in `CONTENT`.
-"""
+        return SPECIALIST_PROMPT.format(
+            name=self.name,
+            current_date_time=current_time,
+            role_description=self.role_description,
+            indexed_documents_context=docs_context,
+            system_instructions=self.system_instructions.strip(),
+            available_tools=tools_text,
+        )
 
     def _clean_json(self, raw: str) -> str:
         """Strips Markdown wrappers from LLM outputs."""
@@ -188,11 +215,21 @@ When you have collected the required information, output `STEP: ANSWER` with a c
             # 2. REFLECTION & SELF-CORRECTION STEP
             # ---------------------------------------------------------
             if parsed.STEP == "REFLECT":
-                print_step(
-                    step="REFLECT",
-                    content=parsed.CONTENT or "Analysing execution error...",
-                    tool=None,
+                self._emit(
+                    event=NovaEvent(
+                        event_type="reflection",
+                        content=parsed.CONTENT or "Analysing execution error...",
+                        data={
+                            "agent": self.name,
+                            "turn": turns,
+                        }
+                    )
                 )
+                # print_step(
+                #     step="REFLECT",
+                #     content=parsed.CONTENT or "Analysing execution error...",
+                #     tool=None,
+                # )
 
                 messages.append(
                     {
@@ -206,13 +243,20 @@ When you have collected the required information, output `STEP: ANSWER` with a c
             # Handle Tool Execution Turn
             # -------------------------------------------------------------
             if parsed.STEP == "TOOL" and parsed.TOOL:
-                print_step(
-                    step="TOOL",
-                    content=f"[{self.name}] {parsed.CONTENT or ''}",
-                    tool=parsed.TOOL,
+                self._emit(
+                    event=NovaEvent(
+                        event_type="tool_invocation",
+                        content=parsed.CONTENT or "",
+                        data={
+                            "agent": self.name,
+                            "tool": parsed.TOOL,
+                            "input": parsed.INPUT,
+                        },
+                    )
                 )
 
                 tool_input = parsed.INPUT or {}
+
                 # Scan for generated image or CSV artifacts (e.g. 'chart.png')
                 if "code" in tool_input:
                     matches = re.findall(
@@ -278,8 +322,21 @@ When you have collected the required information, output `STEP: ANSWER` with a c
                     {
                         "role": "user",
                         "content": obs_str
-                        + "\n\n[SYSTEM]: Review the result. If complete, output STEP: ANSWER.",
+                        + "\n\n[SYSTEM OBSERVATION RECEIVED]: Analyze whether the assigned subtask is fully satisfied. If more actions (e.g. running Python calculations) are required, execute the next `STEP: TOOL`. ONLY output `STEP: ANSWER` if all requirements of the subtask are completely finished.",
                     }
+                )
+
+                self._emit(
+                    event=NovaEvent(
+                        event_type="tool_result",
+                        content=f"\n\n✅ [RESULT OF #{task_id} DONE BY {parsed.TOOL} -> {tool_output}]\n",
+                        data={
+                            "agent": self.name,
+                            "tool": parsed.TOOL,
+                            "output": tool_output,
+                            "success": True,
+                        }
+                    )
                 )
                 continue
 
@@ -287,11 +344,22 @@ When you have collected the required information, output `STEP: ANSWER` with a c
             # Handle Final Answer Step
             # -------------------------------------------------------------
             elif parsed.STEP == "ANSWER":
-                print_step(
-                    step="EXPLANATION",
-                    content=f"[{self.name} Completed Task #{task_id}] {parsed.CONTENT}",
-                    tool=None,
+                self._emit(
+                    event=NovaEvent(
+                        event_type="agent_completed",
+                        content=f"[{self.name} Completed Task #{task_id}] {parsed.CONTENT}",
+                        data={
+                            "agent": self.name,
+                            "task_id": task_id,
+                            "result": parsed.CONTENT,
+                        }
+                    )
                 )
+                # print_step(
+                #     step="EXPLANATION",
+                #     content=f"[{self.name} Completed Task #{task_id}] {parsed.CONTENT}",
+                #     tool=None,
+                # )
                 return TaskResult(
                     task_id=task_id,
                     assigned_agent=self.name,
@@ -299,6 +367,7 @@ When you have collected the required information, output `STEP: ANSWER` with a c
                     summary=parsed.CONTENT,
                     artifacts=detected_artifacts,
                 )
+            
 
             # Handle Reflect / Explanation
             else:

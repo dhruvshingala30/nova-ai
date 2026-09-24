@@ -47,7 +47,7 @@ class NovaAI:
         """
         Constructs system prompt with live tools and dynamic knowledge base catalog.
         """
-        current_date = datetime.now().strftime("%A, %B %d, %Y")  # noqa: DTZ005
+        current_date = datetime.now().strftime("%A, %B %d, %Y at %I:%M:%S %p")  # noqa: DTZ005
         date_context = f"\nCURRENT SYSTEM DATE AND TIME: TODAY is {current_date}.\n"
 
         # Dynamically discover indexed documents
@@ -160,8 +160,6 @@ class NovaAI:
 
         raw_result = response.message.content or "{}"
         cleaned_result = self._clean_json_output(raw_result)
-
-        self.add_message("assistant", cleaned_result)
 
         try:
             return OutputFormat.model_validate_json(cleaned_result)

@@ -57,7 +57,8 @@ def print_step(step: str, content: str, tool: str | None):
     """
     if step == "TOOL":
         icon = STEP_ICONS.get(step, "🛠️")
-        print(f"{icon} : {tool} : {content}")
+        return f"{icon} : {tool} : {content}"
     else:
         icon = STEP_ICONS.get(step, "❓")
-        print(f"{icon} : {content}")
+        return f"{icon} : {content}"
+    

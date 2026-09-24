@@ -16,9 +16,9 @@ class WebSearch:
     """Tavily search engine API integration handler."""
 
     @staticmethod
-    def search_web(query: str, max_results: int = 5) -> dict:
+    def search_web(query: str, time_range: str | None = None) -> dict:
         """
-        Executes a real-time web search query using the Tavily Client API.
+        Performs a live web search using Tavily with optional temporal filtering.
 
         Args:
             query (str): Keyword query string.
@@ -34,15 +34,19 @@ class WebSearch:
                 "error": "TAVILY_API_KEY environment variable is missing.",
             }
 
-        try:
-            client = TavilyClient(api_key=api_key)
+        client = TavilyClient(api_key=api_key)
 
+        kwargs = {
+            "query": query,
+            "max_results": 5,
+            "search_depth": "advanced",
+        }
+        if time_range:
+            kwargs["time_range"] = time_range
+
+        try:
             # Fetch search results optimized for LLM consumption
-            response = client.search(
-                query=query,
-                max_results=max_results,
-                search_depth="basic",
-            )
+            response = client.search(**kwargs)
 
             raw_results = response.get("results", [])
             if not raw_results:
@@ -56,9 +60,10 @@ class WebSearch:
                 {
                     "title": r.get("title", "")[:80],
                     "url": r.get("url", ""),
+                    "published": r.get("published_date", ""),
                     "snippet": r.get("content", "")[:200],
                 }
-                for r in raw_results[:3]
+                for r in raw_results
             ]
 
             return {"success": True, "results": formatted_results}

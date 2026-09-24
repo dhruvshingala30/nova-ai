@@ -49,8 +49,11 @@ AVAILABLE_TOOLS = {
     "search_web": {
         "function": WebSearch.search_web,
         "schema": WebSearchInput,
-        "description": "Searches the live internet for recent world news, live events, or topics NOT found in workspace documents.",
-        "parameters": {"query": "str"},
+        "description": "Performs a live web search for external world events, live facts, news, and current metrics.",
+        "parameters": {
+            "query": "str (The search term)",
+            "time_range": "str (optional) ('day', 'week', 'month', or null)",
+        },
     },
     "list_workspace_files": {
         "function": list_workspace_files,
@@ -102,7 +105,7 @@ AVAILABLE_TOOLS = {
         "parameters": {
             "file_path": "str",
             "prompt": "str (optional)",
-        }
+        },
     },
 }
 

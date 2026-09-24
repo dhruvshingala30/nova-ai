@@ -82,7 +82,7 @@ class TaskResult(BaseModel):
 
     task_id: int
     assigned_agent: str
-    status: Literal["SUCCESS", "FAILED"]
+    status: Literal["SUCCESS", "FAILED", "SKIPPED"]
     summary: str = Field(
         default=...,
         description="Concise factual findings, code results, or extracted knowledge.",
@@ -103,7 +103,7 @@ class SupervisorDecision(BaseModel):
         default=...,
         description=(
             "Action choice: 'DELEGATE' to assign subtasks to specialist workers; "
-            "'SYNTHESIZE' to combine completed worker results into the final user answer; "
+            "'SYNTHESIZE' to combine completed worker results into the formatted final user answer along with mandatory urls and data; "
             "'DIRECT_ANSWER' for everyday conversational greetings or basic factual queries."
         ),
     )
@@ -163,8 +163,10 @@ class WeatherInput(BaseModel):
 class WebSearchInput(BaseModel):
     """Pydantic validation schema for search query strings."""
 
-    query: str = Field(
-        description="Concise search query optimized for real-time search engine retrieval (e.g., 'Nifty 50 today stock price' or 'The Hundred 2026 cricket schedule')."
+    query: str = Field(description="The search query string to look up on the web.")
+    time_range: Literal["day", "week", "month", "year"] | None = Field(
+        default=None,
+        description="Optional freshness filter. Use 'day' for breaking news/today's live status, 'week' for recent events, or leave null for general queries.",
     )
 
 

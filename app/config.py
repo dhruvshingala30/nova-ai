@@ -14,7 +14,7 @@ import os
 OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
 
 # Local LLM model identifier used for agent reasoning
-MODEL_NAME = os.getenv("MODEL_NAME", "qwen2.5:7b")
+MODEL_NAME = os.getenv("MODEL_NAME", "qwen2.5:7b-instruct-q8_0")
 VISION_MODEL_NAME = os.getenv("VISION_MODEL_NAME", "llava")
 
 # -------------------------------
@@ -50,8 +50,9 @@ END_TEXT = "\n  🤖 BYE !!!👋👋  \n"
 STEP_ICONS = {
     "START": "🔥",
     "PLAN": "📋",
-    "REFLECT": "💡",
-    "EXPLANATION": "🧠",
+    "REFLECT": "🔄",
+    "EXPLANATION": "📦",
     "TOOL": "🛠️",
+    "RESULT": "✅",
     "ANSWER": "🤖",
 }
