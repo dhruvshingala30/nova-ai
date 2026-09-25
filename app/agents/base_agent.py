@@ -185,6 +185,7 @@ class BaseSpecialistAgent:
 
         turns = 0
         detected_artifacts: list[str] = []
+        hitl_denied = False
 
         while turns < self.max_turns:
             turns += 1
@@ -234,7 +235,7 @@ class BaseSpecialistAgent:
                 messages.append(
                     {
                         "role": "user",
-                        "content": "[REFLECTION ACKNOWLEDGED]: Now summarize the error and either correct the tool invocation or provide a final answer.",
+                        "content": "[REFLECTION ACKNOWLEDGED]: If the operation was blocked or denied by the user, immediately output STEP: ANSWER summarizing what was completed. Otherwise, summarize the error and execute a corrected tool.",
                     }
                 )
                 continue
@@ -275,6 +276,19 @@ class BaseSpecialistAgent:
                 )
 
                 if requires_approval:
+                    self._emit(
+                        event=NovaEvent(
+                            event_type="approval_required",
+                            content="Human approval required for workspace modification.",
+                            data={
+                                "agent": self.name,
+                                "task_id": task_id,
+                                "tool": parsed.TOOL,
+                                "input": parsed.INPUT,
+                                "reason": reason,
+                            }
+                        )
+                    )
                     print("\n ⚠️  [HITL SAFEGUARD - HUMAN APPROVAL REQUIRED]")
                     print(f"   Reason: {reason}")
                     print(f"   Tool: {parsed.TOOL}")
@@ -290,29 +304,46 @@ class BaseSpecialistAgent:
                         .lower()
                     )
 
-                    if approval not in ["y", "yes"]:
+                    if approval in ["y", "yes"]:
+                        self._emit(
+                            event=NovaEvent(
+                                event_type="approval_granted",
+                                content="Human approval granted. Continue tool execution.",
+                                data={
+                                    "agent": self.name,
+                                    "task_id": task_id,
+                                    "tool": parsed.TOOL,
+                                    "input": parsed.INPUT,
+                                    "decision": "approved",
+                                },
+                            )
+                        )
+
+                    else:
+                        self._emit(
+                            event=NovaEvent(
+                                event_type="approval_denied",
+                                content="Human approval denied. Tool execution blocked.",
+                                data={
+                                    "agent": self.name,
+                                    "task_id": task_id,
+                                    "tool": parsed.TOOL,
+                                    "input": parsed.INPUT,
+                                    "reason": "Human operator denied execution.",
+                                    "decision": "denied",
+                                }
+                            )
+                        )
                         print("🚫 Action denied by human operator.")
-                        guidance = (
-                            "\n\n[SYSTEM ALERT - TOOL EXECUTION FAILED]: The tool execution encountered an error. "
-                            "Analyze the error message/traceback above. Your NEXT turn MUST be `STEP: REFLECT` diagnosing "
-                            "the root cause, followed either by a corrected `STEP: TOOL` action OR `STEP: ANSWER` if the operation is forbidden or impossible. "
-                            "Do NOT repeat the exact same failing command."
+                        hitl_denied = True
+
+                        return TaskResult(
+                            task_id=task_id,
+                            assigned_agent=self.name,
+                            status="BLOCKED",
+                            summary=f"Subtask #{task_id} execution halted: Human operator denied approval for tool '{parsed.TOOL}' ({reason}).",
+                            artifacts=[],
                         )
-                        obs_str = create_observation(
-                            parsed.TOOL,
-                            tool_input,
-                            {
-                                "success": False,
-                                "error": "HITL safeguard denied execution.",
-                            },
-                        )
-                        messages.append(
-                            {
-                                "role": "user",
-                                "content": guidance + "\n\n" + obs_str,
-                            }
-                        )
-                        continue
                 # ---------------------------------------------------------
 
                 tool_output = self.execute_tool(parsed.TOOL, tool_input)
@@ -344,6 +375,32 @@ class BaseSpecialistAgent:
             # Handle Final Answer Step
             # -------------------------------------------------------------
             elif parsed.STEP == "ANSWER":
+                # 1. Detect if the instruction demanded a saved file artifact (e.g., .png, .jpg, .csv)
+                target_artifacts = re.findall(
+                    r"['\"]?([\w\-_\.]+\.(?:png|jpg|jpeg|csv|json))['\"]?",
+                    instruction,
+                    flags=re.IGNORECASE,
+                )
+
+                # 2. Check if the demanded file actually exists in the workspace
+                workspace_dir = PROJECT_ROOT / "nova_workspace"
+                missing_artifacts = [
+                    f for f in target_artifacts if not (workspace_dir / f).exists()
+                ]
+
+                # 3. If an artifact is missing, reject ANSWER and force the agent to generate it
+                if missing_artifacts and not hitl_denied:
+                    missing_str = ", ".join(f"'{m}'" for m in missing_artifacts)
+                    warning_msg = (
+                        f"[SYSTEM WARNING]: You were instructed to generate and save {missing_str}, "
+                        f"but the file does not exist in the workspace ({workspace_dir}). "
+                        "You MUST execute `STEP: TOOL` with `run_python_code` calling matplotlib/pandas "
+                        f"(e.g., plt.savefig({missing_str})) to create the file before outputting `STEP: ANSWER`."
+                    )
+                    messages.append({"role": "user", "content": warning_msg})
+                    continue
+
+                # 4. If all checks pass (or HITL was denied), conclude the subtask cleanly
                 self._emit(
                     event=NovaEvent(
                         event_type="agent_completed",
@@ -363,7 +420,7 @@ class BaseSpecialistAgent:
                 return TaskResult(
                     task_id=task_id,
                     assigned_agent=self.name,
-                    status="SUCCESS",
+                    status="FAILED" if hitl_denied else "SUCCESS",
                     summary=parsed.CONTENT,
                     artifacts=detected_artifacts,
                 )
@@ -382,7 +439,7 @@ class BaseSpecialistAgent:
         return TaskResult(
             task_id=task_id,
             assigned_agent=self.name,
-            status="SUCCESS",
+            status="FAILED" if hitl_denied else "SUCCESS",
             summary=f"{self.name} completed bounded turns. Latest findings: {messages[-1]['content']}",
             artifacts=detected_artifacts,
         )

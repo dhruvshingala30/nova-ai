@@ -27,6 +27,33 @@ VECTOR_DB_DIR = str((PROJECT_ROOT / "data" / "vector_db").resolve())
 COLLECTION_NAME = "nova_workspace_docs"
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 
+# -------------------------------------------------------------
+# Module-level Singleton Cache to avoid re-instantiation overhead
+# -------------------------------------------------------------
+_CHROMA_CLIENT = None
+_EMBEDDING_FN = None
+_COLLECTION = None
+
+
+def _get_collection():
+    """
+    Initializes and caches the persistent ChromaDB client, SentenceTransformer
+    embedding function, and collection once in memory.
+    """
+    global _CHROMA_CLIENT, _EMBEDDING_FN, _COLLECTION
+    if _COLLECTION is None:
+        if not os.path.exists(VECTOR_DB_DIR):
+            return None
+        _CHROMA_CLIENT = chromadb.PersistentClient(VECTOR_DB_DIR)
+        _EMBEDDING_FN = embedding_functions.SentenceTransformerEmbeddingFunction(
+            model_name=EMBEDDING_MODEL
+        )
+        _COLLECTION = _CHROMA_CLIENT.get_collection(
+            name=COLLECTION_NAME,
+            embedding_function=_EMBEDDING_FN,  # type: ignore
+        )
+    return _COLLECTION
+
 
 def tokenize(text: str) -> list[str]:
     """
@@ -79,8 +106,10 @@ def get_indexed_documents() -> list[str]:
         return []
 
     try:
-        client = chromadb.PersistentClient(VECTOR_DB_DIR)
-        collection = client.get_collection(COLLECTION_NAME)
+        collection = _get_collection()
+        if collection is None:
+            return []
+        
         data = collection.get(include=["metadatas"])
         if not data or not data.get("metadatas"):
             return []
@@ -107,14 +136,12 @@ def search_knowledge_base(query: str, n_results: int = 3) -> dict:
         }
 
     try:
-        client = chromadb.PersistentClient(VECTOR_DB_DIR)
-        embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-            model_name=EMBEDDING_MODEL
-        )
-        collection = client.get_collection(
-            name=COLLECTION_NAME,
-            embedding_function=embedding_fn,  # type: ignore
-        )
+        collection = _get_collection()
+        if collection is None:
+            return {
+                "success": False,
+                "message": f"Collection '{COLLECTION_NAME}' could not be loaded from '{VECTOR_DB_DIR}'.",
+            }
 
         # Generate hypothetical passage for dense ChromaDB matching
         dense_search_text = hyde_generator.generate(query=query)

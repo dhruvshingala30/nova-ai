@@ -143,6 +143,7 @@ class MultiAgentOrchestrator:
             format=SupervisorDecision.model_json_schema(),
             messages=self.message_history,
             options={"temperature": 0.0},
+            keep_alive="30m"
         )
 
         raw_result = response.message.content or "{}"
@@ -300,7 +301,7 @@ class MultiAgentOrchestrator:
                         break
 
                 # Also check if the subtask requires an artifact that wasn't created
-                if "denied by human operator" in accumulated_context.lower() and (subtask.dependencies or []):
+                if "denied due to HITL" in accumulated_context.lower():
                     dependency_failed = True
 
                 if dependency_failed:
@@ -315,7 +316,7 @@ class MultiAgentOrchestrator:
                     self._emit(
                         event=NovaEvent(
                             event_type="subtask_skipped",
-                            content=f"⚠️ Subtask #{subtask.task_id} skipped: Upstream dependency was denied or failed.",
+                            content=f"⏭️ [SUBTASK #{subtask.task_id} SKIPPED]: Upstream dependency was denied or failed.",
                             data={
                                 "task_id": subtask.task_id,
                                 "agent": subtask.assigned_agent.value,
@@ -360,6 +361,10 @@ class MultiAgentOrchestrator:
                 "content": (
                     f"Original User Query: {user_query}\n\n"
                     f"Team Findings:\n{all_findings}\n\n"
+                    "SYNTHESIS GUIDELINES:\n"
+                    "- If a subtask has status 'BLOCKED' or 'SKIPPED', explicitly report that the action (such as saving a file or plotting) was aborted/denied.\n"
+                    "- NEVER state that a file was saved or created if its generation subtask was BLOCKED.\n"
+                    "- Directly integrate today's date/time from SYSTEM RUNTIME CONTEXT if the user asked for it.\n\n"
                     "Provide your final ACTION: 'SYNTHESIZE' with the comprehensive 'FINAL_ANSWER'."
                 ),
             },

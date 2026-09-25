@@ -252,6 +252,7 @@ def inspect_image(
                 }
             ],
             options={"temperature": 0.1},
+            keep_alive="5m",
         )
 
         visual_analysis = response.message.content or "No visual description generated."

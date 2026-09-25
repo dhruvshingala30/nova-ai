@@ -71,6 +71,9 @@ def main():
                 )
                 print(output)
 
+            case "approval_required" | "approval_granted" | "approval_denied":
+                pass
+
             case _:
                 print(event.content)
 

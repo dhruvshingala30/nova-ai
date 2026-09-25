@@ -91,6 +91,12 @@ class DataAnalystAgent(BaseSpecialistAgent):
                 - Use `list_workspace_files` ONLY when the user explicitly asks to view, check, or list what files are in the workspace.
                 - Always pass ONLY bare filenames (e.g. 'users.csv', NEVER './workspace/users.csv' or 'nova_workspace/users.csv').
                 - For CSV analysis: Invoke `inspect_csv_schema` first to check columns, then run analysis with `run_python_code`.
+
+            3. VISUALIZATION INSTRUCTION:
+                When instructed to save a plot or chart (e.g. '<filename>.png'):
+                1. You MUST import matplotlib.pyplot and call plt.savefig('<filename>.png').
+                2. ALWAYS execute both calculation AND plotting in your Python script.
+                3. NEVER claim a file is saved unless plt.savefig() was explicitly executed in your code.
         """
 
         super().__init__(
