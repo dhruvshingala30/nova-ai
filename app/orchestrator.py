@@ -64,6 +64,8 @@ class MultiAgentOrchestrator:
 
     def _emit(self, event: NovaEvent):
         """Emits an event to the registered event handler."""
+        if self.session_id:
+            event.data.setdefault("session_id", self.session_id)
 
         if self.event_handler:
             self.event_handler(event)
