@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -16,6 +16,18 @@ type ChatTurn = {
   events: NovaEvent[];
   assistantMessage?: string;
   activityExpanded: boolean;
+};
+
+type ChatSession = {
+  session_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type ConversationMessage = {
+  role: "user" | "assistant";
+  content: string;
 };
 
 function formatActivityEvent(event: NovaEvent) {
@@ -342,6 +354,7 @@ export default function Home() {
   const [chatTurns, setChatTurns] = useState<ChatTurn[]>([]);
   const [isRunning, setIsRunning] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessions, setSessions] = useState<ChatSession[]>([]);
   
   const [pendingApproval, setPendingApproval] = useState<{
     turnId: string;
@@ -352,6 +365,36 @@ export default function Home() {
   } | null>(null);
     
   const [isSubmittingApproval, setIsSubmittingApproval] = useState(false);
+  
+  const loadSessions = async () => {
+    try {
+      const response = await fetch("http://127.0.0.1:8000/api/conversations");
+
+      if (!response.ok) {
+        throw new Error(`Failed to load conversations: ${response.status}`);
+      }
+
+      const data: ChatSession[] = await response.json();
+
+      setSessions(data);
+    } catch (error) {
+      console.error("Failed to load conversations:", error);
+    }
+  };
+    
+  const handleNewChat = () => {
+    if (isRunning) return;
+
+    setChatTurns([]);
+    setSessionId(null);
+    setMessage("");
+    setPendingApproval(null);
+    setIsSubmittingApproval(false);
+  };
+    
+  useEffect(() => {
+    loadSessions();
+  }, []);
     
   const submitApproval = async (approved: boolean) => {
     if (!pendingApproval || isSubmittingApproval) return;
@@ -379,6 +422,55 @@ export default function Home() {
       console.error("Failed to submit HITL decision:", error);
     } finally {
       setIsSubmittingApproval(false);
+    }
+  };
+    
+  const loadConversation = async (selectedSessionId: string) => {
+    if (isRunning) return;
+
+    try {
+      setIsRunning(false);
+      setPendingApproval(null);
+      setMessage("");
+
+      const response = await fetch(
+        `http://127.0.0.1:8000/api/conversations/${selectedSessionId}`,
+      );
+
+      if (!response.ok) {
+        throw new Error(`Failed to load conversation: ${response.status}`);
+      }
+
+      const messages: ConversationMessage[] = await response.json();
+
+      const turns: ChatTurn[] = [];
+
+      let currentTurn: ChatTurn | null = null;
+
+      for (const item of messages) {
+        if (item.role === "user") {
+          currentTurn = {
+            id: crypto.randomUUID(),
+            userMessage: item.content,
+            events: [],
+            activityExpanded: false,
+          };
+
+          turns.push(currentTurn);
+        } else if (item.role === "assistant") {
+          if (currentTurn) {
+            currentTurn.assistantMessage = item.content;
+          }
+        }
+      }
+
+      setChatTurns(turns);
+      setSessionId(selectedSessionId);
+
+      console.log("Loaded conversation:", selectedSessionId);
+      console.log("Messages:", messages);
+    } catch (error) {
+      console.error("Failed to load conversation:", error);
     }
   };
 
@@ -432,7 +524,9 @@ export default function Home() {
       setSessionId(data.session_id);
 
       console.log("Nova started:", data);
-
+      
+      let streamCompleted = false;
+      
       // Connect to Nova's SSE stream
       const eventSource = new EventSource(
         `http://127.0.0.1:8000/api/chat/${data.session_id}/events`,
@@ -454,7 +548,7 @@ export default function Home() {
       ];
 
       novaEvents.forEach((eventType) => {
-        eventSource.addEventListener(eventType, (event) => {
+        eventSource.addEventListener(eventType, async (event) => {
           const messageEvent = event as MessageEvent;
 
           try {
@@ -494,6 +588,9 @@ export default function Home() {
 
             // final_answer completes this chat turn
             if (eventType === "final_answer") {
+              streamCompleted = true;
+              eventSource.close();
+              
               setChatTurns((previous) =>
                 previous.map((turn) =>
                   turn.id === turnId
@@ -506,7 +603,7 @@ export default function Home() {
               );
 
               setIsRunning(false);
-              eventSource.close();
+              loadSessions()
             } else {
               // Add the event to THIS chat turn
               setChatTurns((previous) =>
@@ -529,8 +626,12 @@ export default function Home() {
       });
 
       eventSource.onerror = (error) => {
-        console.error("Nova SSE error:", error);
+        // If the stream already completed or is in CLOSED state, ignore the event
+        if (streamCompleted || eventSource.readyState === EventSource.CLOSED) {
+          return;
+        }
 
+        console.error("Nova SSE error:", error);
         setIsRunning(false);
         eventSource.close();
       };
@@ -545,326 +646,408 @@ export default function Home() {
   };
 
   return (
-    <main className="flex min-h-screen flex-col">
-      {/* Header */}
-      <header className="border-b px-6 py-4">
-        <h1 className="text-xl font-semibold">Nova</h1>
+    <main className="flex h-screen w-screen overflow-hidden bg-white text-gray-900">
+      {/* 1. INDEPENDENT SIDEBAR */}
+      <aside className="flex h-full w-64 shrink-0 flex-col border-r bg-gray-50">
+        {/* Sidebar header */}
+        <div className="border-b px-5 py-4">
+          <h1 className="text-lg font-semibold tracking-tight text-gray-900">
+            Nova
+          </h1>
+          <p className="text-xs text-gray-500">Multi-Agent AI Assistant</p>
+        </div>
 
-        <p className="text-sm text-gray-500">Multi-Agent AI Assistant</p>
-      </header>
+        {/* New Chat Button */}
+        <div className="p-3">
+          <button
+            type="button"
+            onClick={handleNewChat}
+            disabled={isRunning}
+            className="flex w-full items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <span>+</span>
+            <span>New Chat</span>
+          </button>
+        </div>
 
-      {/* Main content */}
-      <section className="flex flex-1 justify-center">
-        <div className="w-full max-w-3xl px-6 py-10">
-          {/* Conversation */}
-          <div className="space-y-8">
-            {chatTurns.map((turn) => (
-              <div key={turn.id} className="space-y-5">
-                {/* User message */}
-                <div className="flex justify-end">
-                  <div className="max-w-2xl rounded-2xl bg-black px-5 py-3 text-white">
-                    <p className="mb-1 text-sm font-medium opacity-60">You</p>
+        {/* Sessions list with its own scrollbar */}
+        <div className="flex-1 overflow-y-auto px-3 pb-4">
+          <p className="px-2 py-2 text-xs font-semibold uppercase tracking-wider text-gray-400">
+            Conversations
+          </p>
 
-                    <p className="whitespace-pre-wrap text-base leading-7">
-                      {turn.userMessage}
-                    </p>
-                  </div>
-                </div>
+          <div className="space-y-1">
+            {sessions.map((session) => (
+              <button
+                key={session.session_id}
+                type="button"
+                onClick={() => loadConversation(session.session_id)}
+                disabled={isRunning}
+                className={`w-full truncate rounded-lg px-3 py-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${
+                  session.session_id === sessionId
+                    ? "bg-gray-200/80 font-medium text-gray-900"
+                    : "text-gray-600 hover:bg-gray-200/50 hover:text-gray-900"
+                }`}
+              >
+                {session.title}
+              </button>
+            ))}
+          </div>
+        </div>
 
-                {/* Nova activity */}
-                {turn.events.length > 0 && (
-                  <div className="rounded-2xl border">
-                    {/* Activity header */}
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setChatTurns((previous) =>
-                          previous.map((item) =>
-                            item.id === turn.id
-                              ? {
-                                  ...item,
-                                  activityExpanded: !item.activityExpanded,
-                                }
-                              : item,
-                          ),
-                        )
-                      }
-                      className="flex w-full items-center justify-between px-5 py-4 text-left"
-                    >
-                      <div>
-                        <p className="text-sm font-medium text-gray-500">
-                          Nova Activity
+        {/* Bottom Profile Badge */}
+        <div className="border-t p-3">
+          <div className="flex items-center gap-3 rounded-xl p-2 hover:bg-gray-100">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gray-900 text-xs font-bold text-white">
+              N
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-xs font-medium text-gray-800">
+                Nova Workspace
+              </p>
+              <p className="text-[10px] text-gray-400">Local Multi-Agent</p>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      {/* 2. INDEPENDENT MAIN CHAT WORKSPACE */}
+      <section className="relative flex h-full flex-1 flex-col overflow-hidden bg-white">
+        {chatTurns.length === 0 ? (
+          /* ========================================================= */
+          /* EMPTY STATE: CENTERED INPUT & GEMINI / CHATGPT TAGLINE   */
+          /* ========================================================= */
+          <div className="flex h-full flex-col items-center justify-center px-4 pb-20">
+            <div className="w-full max-w-2xl text-center">
+              <h2 className="mb-2 text-3xl font-semibold tracking-tight text-gray-800">
+                Where should we begin?
+              </h2>
+              <p className="mb-8 text-sm text-gray-500">
+                Ask a question, query documents, analyze datasets, or run
+                research workflows.
+              </p>
+
+              {/* Centered Input Box */}
+              <div className="relative flex items-center rounded-2xl border border-gray-200 bg-white p-2 shadow-sm focus-within:border-gray-400 focus-within:ring-2 focus-within:ring-gray-100">
+                <input
+                  type="text"
+                  value={message}
+                  disabled={isRunning}
+                  onChange={(e) => setMessage(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      sendMessage();
+                    }
+                  }}
+                  placeholder="Ask Nova anything..."
+                  className="w-full bg-transparent px-4 py-3 text-base text-gray-800 placeholder-gray-400 outline-none"
+                  autoFocus
+                />
+                <button
+                  type="button"
+                  onClick={sendMessage}
+                  disabled={isRunning || !message.trim()}
+                  className="rounded-xl bg-gray-900 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {isRunning ? "Running..." : "Send"}
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          /* ========================================================= */
+          /* ACTIVE CONVERSATION STATE: SCROLLABLE FEED + DOCKED BAR  */
+          /* ========================================================= */
+          <div className="flex h-full flex-col">
+            {/* Scrollable messages container */}
+            <div className="flex-1 overflow-y-auto px-6 py-8">
+              <div className="mx-auto max-w-3xl space-y-8 pb-10">
+                {chatTurns.map((turn) => (
+                  <div key={turn.id} className="space-y-5">
+                    {/* User message */}
+                    <div className="flex justify-end">
+                      <div className="max-w-2xl rounded-2xl bg-gray-900 px-5 py-3 text-white shadow-sm">
+                        <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-gray-400">
+                          You
                         </p>
-
-                        <p className="text-xs text-gray-400">
-                          {
-                            turn.events.filter(
-                              (event) => event.event_type !== "final_answer",
-                            ).length
-                          }{" "}
-                          {turn.events.filter(
-                            (event) => event.event_type !== "final_answer",
-                          ).length === 1
-                            ? "event"
-                            : "events"}
+                        <p className="whitespace-pre-wrap text-base leading-7">
+                          {turn.userMessage}
                         </p>
                       </div>
+                    </div>
 
-                      <span className="text-lg text-gray-400">
-                        {turn.activityExpanded ? "⌃" : "⌄"}
-                      </span>
-                    </button>
+                    {/* Nova activity feed */}
+                    {turn.events.length > 0 && (
+                      <div className="rounded-2xl border border-gray-200 bg-white shadow-sm">
+                        {/* Activity header toggle */}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setChatTurns((previous) =>
+                              previous.map((item) =>
+                                item.id === turn.id
+                                  ? {
+                                      ...item,
+                                      activityExpanded: !item.activityExpanded,
+                                    }
+                                  : item,
+                              ),
+                            )
+                          }
+                          className="flex w-full items-center justify-between px-5 py-3 text-left transition hover:bg-gray-50"
+                        >
+                          <div>
+                            <p className="text-sm font-medium text-gray-700">
+                              Nova Activity
+                            </p>
+                            <p className="text-xs text-gray-400">
+                              {
+                                turn.events.filter(
+                                  (e) => e.event_type !== "final_answer",
+                                ).length
+                              }{" "}
+                              actions recorded
+                            </p>
+                          </div>
+                          <span className="text-base text-gray-400">
+                            {turn.activityExpanded ? "⌃" : "⌄"}
+                          </span>
+                        </button>
 
-                    {/* Active agent */}
-                    {isRunning &&
-                      turn.id === chatTurns[chatTurns.length - 1]?.id &&
+                        {/* Active agent pill */}
+                        {isRunning &&
+                          turn.id === chatTurns[chatTurns.length - 1]?.id &&
+                          (() => {
+                            const activeAgent = getActiveAgent(turn.events);
+                            if (!activeAgent) return null;
+
+                            return (
+                              <div className="border-t bg-gray-50/60 px-5 py-2.5">
+                                <div className="flex items-center gap-3">
+                                  <div className="flex h-7 w-7 items-center justify-center rounded-full border bg-white text-xs">
+                                    🤖
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">
+                                      Active Specialist
+                                    </p>
+                                    <p className="text-xs font-semibold text-gray-800">
+                                      {activeAgent.agent}
+                                    </p>
+                                    {activeAgent.task && (
+                                      <p className="truncate text-xs text-gray-500">
+                                        {activeAgent.task}
+                                      </p>
+                                    )}
+                                  </div>
+                                  <div className="ml-auto flex gap-1">
+                                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-gray-400" />
+                                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-gray-400 [animation-delay:150ms]" />
+                                    <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-gray-400 [animation-delay:300ms]" />
+                                  </div>
+                                </div>
+                              </div>
+                            );
+                          })()}
+
+                        {/* Expanded activity steps */}
+                        {turn.activityExpanded && (
+                          <div className="border-t px-5 py-4">
+                            <div className="space-y-0">
+                              {turn.events
+                                .filter((e) => e.event_type !== "final_answer")
+                                .map((event, index, filteredEvents) => {
+                                  const activity = formatActivityEvent(event);
+                                  const isLast =
+                                    index === filteredEvents.length - 1;
+
+                                  return (
+                                    <div
+                                      key={`${event.event_type}-${index}`}
+                                      className="relative flex gap-3"
+                                    >
+                                      <div className="flex w-6 shrink-0 flex-col items-center">
+                                        <div
+                                          className={`z-10 mt-0.5 flex h-6 w-6 items-center justify-center rounded-full border bg-white text-xs ${
+                                            activity.tone === "warning"
+                                              ? "border-amber-300"
+                                              : activity.tone === "danger"
+                                                ? "border-red-300"
+                                                : activity.tone === "success"
+                                                  ? "border-green-300"
+                                                  : "border-gray-200"
+                                          }`}
+                                        >
+                                          {activity.icon}
+                                        </div>
+                                        {!isLast && (
+                                          <div className="w-px flex-1 bg-gray-200" />
+                                        )}
+                                      </div>
+
+                                      <div
+                                        className={`mb-3 min-w-0 flex-1 rounded-lg px-3 py-2 ${
+                                          activity.tone === "warning"
+                                            ? "bg-amber-50"
+                                            : activity.tone === "danger"
+                                              ? "bg-red-50"
+                                              : activity.tone === "success"
+                                                ? "bg-green-50"
+                                                : "bg-gray-50/70"
+                                        }`}
+                                      >
+                                        <p
+                                          className={`text-xs font-semibold ${
+                                            activity.tone === "warning"
+                                              ? "text-amber-700"
+                                              : activity.tone === "danger"
+                                                ? "text-red-700"
+                                                : activity.tone === "success"
+                                                  ? "text-green-700"
+                                                  : "text-gray-800"
+                                          }`}
+                                        >
+                                          {activity.title}
+                                        </p>
+                                        <p className="mt-0.5 whitespace-pre-wrap text-xs leading-5 text-gray-600">
+                                          {event.content}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* HITL Card */}
+                    {pendingApproval?.turnId === turn.id && (
+                      <div className="rounded-2xl border border-amber-200 bg-amber-50/60 p-5 shadow-sm">
+                        <div className="flex items-start gap-3">
+                          <span className="mt-0.5 text-lg">⚠️</span>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-semibold text-amber-900">
+                              Approval Required
+                            </p>
+                            <p className="mt-0.5 text-xs text-amber-800">
+                              Tool execution paused for operator confirmation:
+                            </p>
+
+                            <div className="mt-3 rounded-lg border border-amber-200 bg-white p-3">
+                              <p className="text-xs font-semibold text-gray-800">
+                                Tool: {pendingApproval.tool}
+                              </p>
+                              <p className="mt-1 whitespace-pre-wrap text-xs text-gray-600">
+                                {pendingApproval.reason}
+                              </p>
+                            </div>
+
+                            {pendingApproval.code && (
+                              <details className="mt-2.5">
+                                <summary className="cursor-pointer text-xs font-medium text-amber-800">
+                                  View Python Script Preview
+                                </summary>
+                                <pre className="mt-2 overflow-x-auto rounded-lg bg-gray-900 p-3 text-xs text-gray-100">
+                                  {pendingApproval.code}
+                                </pre>
+                              </details>
+                            )}
+
+                            <div className="mt-4 flex gap-2">
+                              <button
+                                type="button"
+                                onClick={() => submitApproval(true)}
+                                disabled={isSubmittingApproval}
+                                className="rounded-lg bg-gray-900 px-4 py-2 text-xs font-medium text-white hover:bg-black disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                {isSubmittingApproval
+                                  ? "Submitting..."
+                                  : "Approve"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => submitApproval(false)}
+                                disabled={isSubmittingApproval}
+                                className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                              >
+                                Deny
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Agent Thinking Indicator */}
+                    {turn.id === chatTurns[chatTurns.length - 1]?.id &&
+                      isRunning &&
                       (() => {
-                        const activeAgent = getActiveAgent(turn.events);
-
-                        if (!activeAgent) return null;
-
+                        const status = getProcessingStatus(turn.events);
                         return (
-                          <div className="border-t bg-gray-50/50 px-5 py-3">
-                            <div className="flex items-center gap-3">
-                              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border bg-white text-sm">
-                                🤖
-                              </div>
-
-                              <div className="min-w-0">
-                                <p className="text-xs font-medium uppercase tracking-wide text-gray-400">
-                                  Currently working
-                                </p>
-
-                                <p className="text-sm font-semibold text-gray-800">
-                                  {activeAgent.agent}
-                                </p>
-
-                                {activeAgent.task && (
-                                  <p className="mt-0.5 truncate text-xs text-gray-500">
-                                    {activeAgent.task}
-                                  </p>
-                                )}
-                              </div>
-
-                              <div className="ml-auto flex gap-1">
-                                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-gray-400" />
-                                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-gray-400 [animation-delay:150ms]" />
-                                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-gray-400 [animation-delay:300ms]" />
-                              </div>
+                          <div className="flex justify-start">
+                            <div className="rounded-2xl border border-gray-200 bg-white px-4 py-2.5 shadow-sm">
+                              <p className="flex items-center gap-2 text-xs text-gray-500">
+                                <span>{status.icon}</span>
+                                <span>{status.text}</span>
+                                <span className="animate-pulse">•••</span>
+                              </p>
                             </div>
                           </div>
                         );
                       })()}
 
-                    {/* Activity details */}
-                    {turn.activityExpanded && (
-                      <div className="border-t px-5 py-4">
-                        <div className="space-y-0">
-                          {turn.events
-                            .filter(
-                              (event) => event.event_type !== "final_answer",
-                            )
-                            .map((event, index) => {
-                              const activity = formatActivityEvent(event);
-                              const isLast =
-                                index ===
-                                turn.events.filter(
-                                  (item) => item.event_type !== "final_answer",
-                                ).length -
-                                  1;
-
-                              return (
-                                <div
-                                  key={`${event.event_type}-${index}`}
-                                  className="relative flex gap-3"
-                                >
-                                  {/* Timeline */}
-                                  <div className="flex w-6 shrink-0 flex-col items-center">
-                                    {/* Event icon */}
-                                    <div
-                                      className={`z-10 mt-0.5 flex h-6 w-6 items-center justify-center rounded-full border bg-white text-sm ${
-                                        activity.tone === "warning"
-                                          ? "border-amber-300"
-                                          : activity.tone === "danger"
-                                            ? "border-red-300"
-                                            : activity.tone === "success"
-                                              ? "border-green-300"
-                                              : "border-gray-200"
-                                      }`}
-                                    >
-                                      {activity.icon}
-                                    </div>
-
-                                    {/* Timeline connector */}
-                                    {!isLast && (
-                                      <div className="w-px flex-1 bg-gray-200" />
-                                    )}
-                                  </div>
-
-                                  {/* Event content */}
-                                  <div
-                                    className={`mb-4 min-w-0 flex-1 rounded-lg px-3 py-2 ${
-                                      activity.tone === "warning"
-                                        ? "bg-amber-50"
-                                        : activity.tone === "danger"
-                                          ? "bg-red-50"
-                                          : activity.tone === "success"
-                                            ? "bg-green-50"
-                                            : "bg-gray-50/50"
-                                    }`}
-                                  >
-                                    <p
-                                      className={`text-sm font-medium ${
-                                        activity.tone === "warning"
-                                          ? "text-amber-700"
-                                          : activity.tone === "danger"
-                                            ? "text-red-700"
-                                            : activity.tone === "success"
-                                              ? "text-green-700"
-                                              : "text-gray-800"
-                                      }`}
-                                    >
-                                      {activity.title}
-                                    </p>
-
-                                    <p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-gray-500">
-                                      {event.content}
-                                    </p>
-                                  </div>
-                                </div>
-                              );
-                            })}
+                    {/* Final Answer Display */}
+                    {turn.assistantMessage && (
+                      <div className="flex justify-start">
+                        <div className="max-w-3xl rounded-2xl border border-gray-200 bg-white px-6 py-5 shadow-sm">
+                          <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-400">
+                            Nova
+                          </p>
+                          <div className="prose prose-sm max-w-none text-gray-800">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {turn.assistantMessage}
+                            </ReactMarkdown>
+                          </div>
                         </div>
                       </div>
                     )}
                   </div>
-                )}
-
-                {/* HITL Approval */}
-                {pendingApproval?.turnId === turn.id && (
-                  <div className="rounded-2xl border border-amber-200 bg-amber-50 p-5">
-                    <div className="flex items-start gap-3">
-                      <div className="mt-0.5 text-lg">⚠️</div>
-
-                      <div className="min-w-0 flex-1">
-                        <p className="font-medium text-amber-900">
-                          Human approval required
-                        </p>
-
-                        <p className="mt-1 text-sm text-amber-800">
-                          Nova wants permission to execute:
-                        </p>
-
-                        <div className="mt-3 rounded-lg border border-amber-200 bg-white p-3">
-                          <p className="text-sm font-medium text-gray-800">
-                            Tool: {pendingApproval.tool}
-                          </p>
-
-                          <p className="mt-1 whitespace-pre-wrap text-sm text-gray-600">
-                            {pendingApproval.reason}
-                          </p>
-                        </div>
-
-                        {pendingApproval.code && (
-                          <details className="mt-3">
-                            <summary className="cursor-pointer text-sm font-medium text-amber-800">
-                              View code
-                            </summary>
-
-                            <pre className="mt-2 overflow-x-auto rounded-lg bg-gray-900 p-3 text-xs text-gray-100">
-                              {pendingApproval.code}
-                            </pre>
-                          </details>
-                        )}
-
-                        <div className="mt-4 flex gap-2">
-                          <button
-                            type="button"
-                            onClick={() => submitApproval(true)}
-                            disabled={isSubmittingApproval}
-                            className="rounded-lg bg-black px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            {isSubmittingApproval ? "Submitting..." : "Approve"}
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => submitApproval(false)}
-                            disabled={isSubmittingApproval}
-                            className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-                          >
-                            Deny
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Nova working indicator */}
-                {turn.id === chatTurns[chatTurns.length - 1]?.id &&
-                  isRunning &&
-                  (() => {
-                    const status = getProcessingStatus(turn.events);
-
-                    return (
-                      <div className="flex justify-start">
-                        <div className="rounded-2xl border px-5 py-3">
-                          <p className="flex items-center gap-2 text-sm text-gray-500">
-                            <span>{status.icon}</span>
-                            <span>{status.text}</span>
-                            <span className="animate-pulse">•••</span>
-                          </p>
-                        </div>
-                      </div>
-                    );
-                  })()}
-
-                {/* Nova answer */}
-                {turn.assistantMessage && (
-                  <div className="flex justify-start">
-                    <div className="max-w-3xl rounded-2xl border px-5 py-4">
-                      <p className="mb-1 text-sm font-medium text-gray-500">
-                        Nova
-                      </p>
-
-                      <div className="prose prose-sm max-w-none">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {turn.assistantMessage}
-                        </ReactMarkdown>
-                      </div>
-                    </div>
-                  </div>
-                )}
+                ))}
               </div>
-            ))}
-          </div>
+            </div>
 
-          {/* Input */}
-          <div className="mt-8 flex gap-2">
-            <input
-              type="text"
-              value={message}
-              disabled={isRunning}
-              onChange={(event) => setMessage(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  sendMessage();
-                }
-              }}
-              placeholder="Ask Nova anything..."
-              className="flex-1 rounded-xl border px-4 py-3 outline-none focus:ring-2"
-            />
-
-            <button
-              onClick={sendMessage}
-              disabled={isRunning}
-              className="rounded-xl border px-5 py-3 font-medium disabled:opacity-50"
-            >
-              {isRunning ? "Running..." : "Send"}
-            </button>
+            {/* Bottom Docked Input Form */}
+            <div className="border-t bg-white px-6 py-4">
+              <div className="mx-auto flex max-w-3xl items-center gap-2 rounded-2xl border border-gray-200 bg-white p-2 shadow-sm focus-within:border-gray-400 focus-within:ring-2 focus-within:ring-gray-100">
+                <input
+                  type="text"
+                  value={message}
+                  disabled={isRunning}
+                  onChange={(e) => setMessage(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      sendMessage();
+                    }
+                  }}
+                  placeholder="Ask Nova anything..."
+                  className="flex-1 bg-transparent px-4 py-2 text-sm text-gray-800 placeholder-gray-400 outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={sendMessage}
+                  disabled={isRunning || !message.trim()}
+                  className="rounded-xl bg-gray-900 px-5 py-2 text-sm font-medium text-white transition hover:bg-black disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {isRunning ? "Running..." : "Send"}
+                </button>
+              </div>
+            </div>
           </div>
-        </div>
+        )}
       </section>
     </main>
   );

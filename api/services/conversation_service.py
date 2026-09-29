@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -9,15 +10,9 @@ class ConversationService:
     def __init__(self):
         self.memory = SQLiteMemory()
 
-    def list_conversations(self) -> list[dict[str, str]]:
+    def list_conversations(self) -> list[dict[str, Any]]:
         """Retrieves all conversations from memory."""
-        sessions = self.memory.list_sessions()
-        return [
-            {
-                "session_id": session_id
-            }
-            for session_id in sessions
-        ]
+        return self.memory.list_sessions()
 
     def get_conversation(self, session_id: str) -> list[dict[str, str]]:
         """Retrieves a specific conversation by session ID."""

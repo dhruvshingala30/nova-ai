@@ -104,7 +104,11 @@ class SQLiteMemory:
             cursor = conn.cursor()
 
             cursor.execute(
-                "SELECT session_id, title, created_at, updated_at FROM sessions ORDER BY updated_at DESC"
+                """SELECT session_id, title, created_at, updated_at 
+                FROM sessions 
+                WHERE TRIM(session_id) != ''
+                AND TRIM(title) != ''
+                ORDER BY updated_at DESC"""
             )
 
             rows = cursor.fetchall()
