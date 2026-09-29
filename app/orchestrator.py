@@ -9,6 +9,7 @@ Orchestrates Phase 3.1 multi-agent workflows by:
 """
 
 import re
+import uuid
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -42,6 +43,7 @@ class MultiAgentOrchestrator:
         self.model = MODEL_NAME
         self.memory = SQLiteMemory()
         self.session_id = session_id
+        self.session_title: str | None = None
         self.context_bus = SharedContextBus()
         self.event_handler = event_handler
 
@@ -179,24 +181,38 @@ class MultiAgentOrchestrator:
         """
         # Auto-generate session title if needed
         if self.session_id is None:
-            self.session_id = self.memory.generate_title_from_prompt(
+            self.session_id = str(uuid.uuid4())
+
+        session_title = self.memory.get_session_title(session_id=self.session_id)
+
+        if session_title is None:
+            session_title = self.memory.generate_title_from_prompt(
                 client=self.client,
                 model_name=self.model,
                 prompt=user_query,
             )
 
+            self.memory.save_session(
+                session_id=self.session_id,
+                title=session_title,
+            )
+
             self._emit(
                 event=NovaEvent(
                     event_type="session_created",
-                    content=f"📝 New Session Title Generated: '{self.session_id}'",
+                    content="🆕 New Session Title Generated\n"
+                            f"🆔: {self.session_id}"
+                            f"Title: {session_title}",
                     data={
                         "user_query": user_query,
                         "session_id": self.session_id,
+                        "session_title": session_title,
                     },
                 )
             )
             # print(f"📝 New Session Title Generated: '{self.session_id}'")
 
+        self.session_title = session_title
         # Save user query to persistent SQLite memory
         self.add_message(role="user", content=user_query)
 
@@ -276,7 +292,7 @@ class MultiAgentOrchestrator:
                 self._emit(
                     event=NovaEvent(
                         event_type="subtask_dispatched",
-                        content=f"\n🚀 [DISPATCHING SUBTASK #{subtask.task_id}] -> {subtask.assigned_agent.value}",
+                        content=f"🚀 [DISPATCHING SUBTASK #{subtask.task_id}] -> {subtask.assigned_agent.value}",
                         data={
                             "task_id": subtask.task_id,
                             "agent": subtask.assigned_agent.value,
@@ -332,6 +348,7 @@ class MultiAgentOrchestrator:
                     task_id=subtask.task_id,
                     instruction=subtask.instruction,
                     context_findings=accumulated_context,
+                    session_id=self.session_id
                 )
 
                 # Publish result to shared blackboard
@@ -348,7 +365,7 @@ class MultiAgentOrchestrator:
         self._emit(
             event=NovaEvent(
                 event_type="synthesis_started",
-                content="\n💬 [SUPERVISOR] Synthesizing all specialist findings into final answer...",
+                content="💬 [SUPERVISOR] Synthesizing all specialist findings into final answer...",
                 data={
                     "subtask_count": len(subtasks),
                     "agent_results": all_findings,

@@ -6,6 +6,7 @@ Provides database persistence for chat history across terminal restarts.
 import re
 import sqlite3
 from pathlib import Path
+from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 DEFAULT_DB_PATH = PROJECT_ROOT / "data" / "nova_memory.db"
@@ -39,6 +40,16 @@ class SQLiteMemory:
             cursor.execute(
                 "CREATE INDEX IF NOT EXISTS idx_session_id ON messages (session_id)"
             )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS sessions (
+                session_id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
             conn.commit()
 
     def save_message(self, session_id: str, role: str, content: str):
@@ -48,6 +59,21 @@ class SQLiteMemory:
             cursor.execute(
                 "INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)",
                 (session_id, role, content),
+            )
+            conn.commit()
+
+    def save_session(self, session_id: str, title: str):
+        """Creates a session or updates its timestamp."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            cursor.execute(
+                """
+                INSERT INTO sessions (session_id, title) VALUES (?, ?) 
+                ON CONFLICT(session_id) 
+                DO UPDATE SET updated_at = CURRENT_TIMESTAMP
+                """,
+                (session_id, title),
             )
             conn.commit()
 
@@ -72,13 +98,38 @@ class SQLiteMemory:
             rows = cursor.fetchall()
             return [{"role": row[0], "content": row[1]} for row in rows]
 
-    def list_sessions(self) -> list[str]:
-        """Returns a list of all unique session IDs stored in the database."""
+    def list_sessions(self) -> list[dict[str, Any]]:
+        """Returns all sessions with their human-readable titles."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("SELECT DISTINCT session_id FROM messages")
+
+            cursor.execute(
+                "SELECT session_id, title, created_at, updated_at FROM sessions ORDER BY updated_at DESC"
+            )
+
             rows = cursor.fetchall()
-            return [row[0] for row in rows]
+            return [
+                {
+                    "session_id": row[0],
+                    "title": row[1],
+                    "created_at": row[2],
+                    "updated_at": row[3],
+                }
+                for row in rows
+            ]
+
+    def get_session_title(self, session_id: str):
+        """Returns the human-readable title for a session."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            cursor.execute(
+                "SELECT TITLE FROM sessions WHERE session_id = ?",
+                (session_id,)
+            )
+            row = cursor.fetchone()
+
+            return row[0] if row else None
 
     def generate_title_from_prompt(self, client, model_name: str, prompt: str) -> str:
         """Generates a clean 3-to-5 word session title from the initial prompt."""

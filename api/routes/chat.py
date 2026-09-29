@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
+from api.core.hitl_manager import hitl_manager
 from api.core.session_events import session_event_manager
 from api.schemas.chat import ChatRequest
 from api.services.nova_services import NovaService
@@ -80,3 +81,24 @@ async def stream_events(session_id: str):
         content=event_generator(),
         media_type="text/event-stream",
     )
+
+@router.post("/chat/{session_id}/approval")
+async def submit_approbal(
+    session_id: str,
+    approved: bool,
+):
+    resolved = hitl_manager.submit_decision(
+        session_id=session_id,
+        approved=approved,
+    )
+
+    if not resolved:
+        return {
+            "session_id": session_id,
+            "status": "no_pending_approval"
+        }
+
+    return {
+        "session_id": session_id,
+        "status": "approved" if approved else "denied",
+    }

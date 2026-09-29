@@ -15,6 +15,7 @@ from pydantic import ValidationError
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
+from api.core.hitl_manager import hitl_manager
 from app.config import MODEL_NAME, OLLAMA_HOST
 from app.core.event import NovaEvent
 from app.models import OutputFormat, TaskResult
@@ -158,6 +159,7 @@ class BaseSpecialistAgent:
         task_id: int,
         instruction: str,
         context_findings: str,
+        session_id: str,
     ) -> TaskResult:
         """
         Executes an assigned subtask using an internal bounded ReAct loop.
@@ -279,12 +281,13 @@ class BaseSpecialistAgent:
                     self._emit(
                         event=NovaEvent(
                             event_type="approval_required",
-                            content="Human approval required for workspace modification.",
+                            content=f"Human approval required: {reason}",
                             data={
                                 "agent": self.name,
                                 "task_id": task_id,
                                 "tool": parsed.TOOL,
                                 "input": parsed.INPUT,
+                                "code": tool_input.get("code", ""),
                                 "reason": reason,
                             }
                         )
@@ -298,13 +301,9 @@ class BaseSpecialistAgent:
                             print(f"   | {line}")
                         print("   --------------------")
 
-                    approval = (
-                        input("👉 Approve this workspace modification? (y/n): ")
-                        .strip()
-                        .lower()
-                    )
+                    approval = hitl_manager.wait_for_decision(session_id=session_id, timeout=300.0)
 
-                    if approval in ["y", "yes"]:
+                    if approval:
                         self._emit(
                             event=NovaEvent(
                                 event_type="approval_granted",
@@ -319,6 +318,9 @@ class BaseSpecialistAgent:
                             )
                         )
 
+                    # -----------------------------------------------------
+                    # DENIED / TIMEOUT
+                    # -----------------------------------------------------
                     else:
                         self._emit(
                             event=NovaEvent(
@@ -360,7 +362,7 @@ class BaseSpecialistAgent:
                 self._emit(
                     event=NovaEvent(
                         event_type="tool_result",
-                        content=f"\n\n✅ [RESULT OF #{task_id} DONE BY {parsed.TOOL} -> {tool_output}]\n",
+                        content=f"✅ [RESULT OF #{task_id} DONE BY {parsed.TOOL} -> {tool_output}]\n",
                         data={
                             "agent": self.name,
                             "tool": parsed.TOOL,
