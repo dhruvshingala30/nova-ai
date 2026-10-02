@@ -5,6 +5,8 @@ Provides database persistence for chat history across terminal restarts.
 
 import re
 import sqlite3
+import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -135,6 +137,47 @@ class SQLiteMemory:
 
             return row[0] if row else None
 
+    def update_session_title(self, session_id: str, title: str) -> None:
+        """Updates only the title of an existing session record."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                UPDATE sessions
+                SET title = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE session_id = ?
+                """,
+                (title, session_id)
+            )
+            conn.commit()
+
+
+    def generate_title_in_background(
+            self, 
+            client, 
+            model_name: str, 
+            prompt: str, 
+            session_id: str, 
+            on_title_generated: Callable[[str], None] | None = None,
+    ) -> None :
+        """Fires an asynchronous daemon thread to generate and update the session title."""
+        def _worker() -> None:
+            # Ask Ollama for the refined title
+            refined_title = self.generate_title_from_prompt(
+                client=client,
+                model_name=model_name,
+                prompt=prompt
+            )
+            # Update database record
+            self.update_session_title(session_id=session_id, title=refined_title)
+
+            # Emit callback event to notify frontend/orchestrator
+            if on_title_generated:
+                on_title_generated(refined_title)
+
+        thread = threading.Thread(target=_worker, daemon=True)
+        thread.start()
+
     def generate_title_from_prompt(self, client, model_name: str, prompt: str) -> str:
         """Generates a clean 3-to-5 word session title from the initial prompt."""
         try:
@@ -150,7 +193,9 @@ class SQLiteMemory:
                     },
                     {"role": "user", "content": prompt},
                 ],
+                keep_alive="30m"
             )
+            
             raw_title = response.message.content.strip()
             clean_title = re.sub(r"[^\w\s-]", "", raw_title)
             return clean_title if clean_title else prompt[:30]

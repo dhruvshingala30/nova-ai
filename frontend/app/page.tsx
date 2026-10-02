@@ -32,6 +32,20 @@ type ConversationMessage = {
 
 function formatActivityEvent(event: NovaEvent) {
   switch (event.event_type) {
+    case "session_updated":
+      return {
+        icon: "✏️",
+        title: "Session Title",
+        tone: "normal",
+      };
+
+    case "plan_started":
+      return {
+        icon: "🧐",
+        title: "Analyzing Request",
+        tone: "normal",
+      };
+
     case "plan_created":
       return {
         icon: "🧠",
@@ -90,7 +104,7 @@ function formatActivityEvent(event: NovaEvent) {
           tone: "normal",
         };
       }
-          
+
       if (tool === "inspect_image") {
         return {
           icon: "🖼️",
@@ -197,8 +211,20 @@ function getProcessingStatus(events: NovaEvent[]) {
       text: "Nova is starting...",
     };
   }
-
+  
   switch (lastEvent.event_type) {
+    case "session_updated":
+      return {
+        icon: "✏️",
+        text: "Nova is updating the session...",
+      };
+
+    case "plan_started":
+      return {
+        icon: "🧐",
+        text: "Nova is analyzing the request and drafting a plan...",
+      };
+
     case "plan_created":
       return {
         icon: "🧠",
@@ -523,16 +549,20 @@ export default function Home() {
       // Store/reuse session ID
       setSessionId(data.session_id);
 
+      // Instantly load the new session into the sidebar list!
+      loadSessions();
+
       console.log("Nova started:", data);
-      
+
       let streamCompleted = false;
-      
+
       // Connect to Nova's SSE stream
       const eventSource = new EventSource(
         `http://127.0.0.1:8000/api/chat/${data.session_id}/events`,
       );
 
       const novaEvents = [
+        "plan_started",
         "plan_created",
         "subtask_list",
         "subtask_dispatched",
@@ -544,6 +574,8 @@ export default function Home() {
         "subtask_skipped",
         "agent_completed",
         "synthesis_started",
+        "synthesis_chunk",
+        "session_updated",
         "final_answer",
       ];
 
@@ -564,7 +596,7 @@ export default function Home() {
 
               return;
             }
-              
+
             if (eventType === "approval_required") {
               const eventData = novaEvent.data ?? {};
 
@@ -586,11 +618,43 @@ export default function Home() {
               });
             }
 
-            // final_answer completes this chat turn
+            // 1. STREAMING CHUNKS: Append tokens directly to the assistant's message buffer
+            else if (eventType === "synthesis_chunk") {
+              setChatTurns((previous) =>
+                previous.map((turn) =>
+                  turn.id === turnId
+                    ? {
+                        ...turn,
+                        assistantMessage:
+                          (turn.assistantMessage ?? "") + novaEvent.content,
+                      }
+                    : turn,
+                ),
+              );
+            }
+
+            // 2. BACKGROUND TITLE UPDATE: Rename sidebar title without reloading
+            else if (eventType === "session_updated") {
+              const updatedTitle = novaEvent.data?.session_title as string;
+              const targetSessionId =
+                (novaEvent.data?.session_id as string) || data.session_id;
+
+              if (updatedTitle) {
+                setSessions((previous) =>
+                  previous.map((s) =>
+                    s.session_id === targetSessionId
+                      ? { ...s, title: updatedTitle }
+                      : s,
+                  ),
+                );
+              }
+            }
+
+            // 3. final_answer completes this chat turn
             if (eventType === "final_answer") {
               streamCompleted = true;
               eventSource.close();
-              
+
               setChatTurns((previous) =>
                 previous.map((turn) =>
                   turn.id === turnId
@@ -603,7 +667,7 @@ export default function Home() {
               );
 
               setIsRunning(false);
-              loadSessions()
+              loadSessions();
             } else {
               // Add the event to THIS chat turn
               setChatTurns((previous) =>
@@ -804,7 +868,9 @@ export default function Home() {
                             <p className="text-xs text-gray-400">
                               {
                                 turn.events.filter(
-                                  (e) => e.event_type !== "final_answer",
+                                  (e) =>
+                                    e.event_type !== "final_answer" &&
+                                    e.event_type !== "synthesis_chunk",
                                 ).length
                               }{" "}
                               actions recorded
@@ -856,7 +922,11 @@ export default function Home() {
                           <div className="border-t px-5 py-4">
                             <div className="space-y-0">
                               {turn.events
-                                .filter((e) => e.event_type !== "final_answer")
+                                .filter(
+                                  (e) =>
+                                    e.event_type !== "final_answer" &&
+                                    e.event_type !== "synthesis_chunk",
+                                )
                                 .map((event, index, filteredEvents) => {
                                   const activity = formatActivityEvent(event);
                                   const isLast =
@@ -984,6 +1054,7 @@ export default function Home() {
                     {/* Agent Thinking Indicator */}
                     {turn.id === chatTurns[chatTurns.length - 1]?.id &&
                       isRunning &&
+                      !turn.assistantMessage && // <--- Hides spinner as soon as the first chunk renders
                       (() => {
                         const status = getProcessingStatus(turn.events);
                         return (

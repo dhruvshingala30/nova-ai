@@ -25,7 +25,7 @@ from app.core.event import NovaEvent
 from app.core.memory import SQLiteMemory
 from app.core.shared_context import SharedContextBus
 from app.models import AgentRole, SubTask, SupervisorDecision, TaskResult
-from app.prompts import SUPERVISOR_PROMPT
+from app.prompts import SUPERVISOR_PROMPT, SYNTHESIS_SYSTEM_PROMPT
 from app.tools.knowledge_base_search import get_indexed_documents
 
 
@@ -47,8 +47,11 @@ class MultiAgentOrchestrator:
         self.context_bus = SharedContextBus()
         self.event_handler = event_handler
 
-        self.message_history: list[dict]= []
-        self._update_system_message()
+        self._cached_supervisor_prompt: str = self._build_supervisor_prompt()
+
+        self.message_history: list[dict]= [
+            {"role": "system", "content": self._cached_supervisor_prompt}
+        ]
 
         if session_id:
             saved_history = self.memory.get_session_history(
@@ -74,38 +77,28 @@ class MultiAgentOrchestrator:
 
 
     def _build_supervisor_prompt(self) -> str:
-        """Constructs the full supervisor system prompt with live date and doc catalog."""
-        current_date = datetime.now().strftime("%A, %B %d, %Y at %I:%M:%S %p")  # noqa: DTZ005
-        date_context = f"CURRENT SYSTEM DATE AND TIME: TODAY is {current_date}.\n"
+        """Keeps static prompt first for 100% KV-cache hit rate."""
+        current_date = datetime.now().strftime("%A, %B %d, %Y")  # noqa: DTZ005
 
         indexed_docs = get_indexed_documents()
-        if indexed_docs:
-            docs_list_str = "\n".join([f"  - {doc}" for doc in indexed_docs])
-            kb_catalog = (
-                f"CURRENTLY INDEXED KNOWLEDGE BASE DOCUMENTS:\n{docs_list_str}\n"
-            )
-        else:
-            kb_catalog = (
-                "CURRENTLY INDEXED KNOWLEDGE BASE DOCUMENTS: None currently indexed.\n"
-            )
+        docs_list_str = "\n".join([f"  - {doc}" for doc in indexed_docs])
 
-        system_banner = (
-            "==========================================================\n"
-            "SYSTEM RUNTIME CONTEXT:\n"
-            f"- {date_context}"
-            f"{kb_catalog}"
-            "==========================================================\n\n"
+        runtime_context = (
+            "\n\n==========================================================\n"
+            "SYSTEM RUNTIME CONTEXT (DYNAMIC):\n"
+            f"- CURRENT SYSTEM DATE: {current_date}\n"
+            f"- CURRENTLY INDEXED DOCUMENTS:\n{docs_list_str if indexed_docs else '  - No indexed documents found.'}"
+            "\n=========================================================="
         )
-        return system_banner + SUPERVISOR_PROMPT
+        return SUPERVISOR_PROMPT + runtime_context
 
     def _update_system_message(self) -> None:
-        """Updates or initializes the root system message in message_history."""
-        full_prompt = self._build_supervisor_prompt()
+        """Ensures the root system message remains intact without invalidating KV cache."""
 
         if not self.message_history:
-            self.message_history.append({"role": "system", "content": full_prompt})
+            self.message_history.append({"role": "system", "content": self._cached_supervisor_prompt})
         else:
-            self.message_history[0] = {"role": "system", "content": full_prompt}
+            self.message_history[0] = {"role": "system", "content": self._cached_supervisor_prompt}
 
 
     def _clean_json_output(self, raw_content: str) -> str:
@@ -115,6 +108,58 @@ class MultiAgentOrchestrator:
             cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
             cleaned = re.sub(r"\s*```$", "", cleaned)
         return cleaned.strip()
+
+
+    def _build_planner_messages(self, max_recent_turns: int = 2) -> list[dict]:
+        """
+        Builds a compact message list specifically for planning.
+        Keeps system rules and the current query, summarizing older turns
+        to minimize prompt evaluation time (prefill latency).
+        """
+        # Ensure root system message is current
+        self._update_system_message()
+        system_msg = self.message_history[0]
+
+        # Extract non-system conversation history (excluding the current user message)
+        history = [m for m in self.message_history[1:-1] if m.get("content")]
+        current_user_msg = self.message_history[-1]
+
+        # If conversation just started, only send system prompt + current prompt
+        if not history:
+            return [system_msg, current_user_msg]
+
+        # Extract the most recent N turns for direct short-term context
+        recent_history = history[-(max_recent_turns * 2) :]
+
+        # Build a brief rolling recap for older turns (if any exist)
+        older_history = history[: -(max_recent_turns * 2)]
+        planner_messages = [system_msg]
+
+        if older_history:
+            recap_snippets = []
+            for msg in older_history:
+                role = "User" if msg["role"] == "user" else "Assistant"
+                # Truncate content to 120 chars to prevent token bloat
+                snippet = msg["content"].replace("\n", " ").strip()[:120]
+                recap_snippets.append(f"- {role}: {snippet}")
+
+            recap_text = (
+                "CONTEXT RECAP (Previous conversation overview):\n"
+                + "\n".join(recap_snippets)
+            )
+            planner_messages.append({"role": "system", "content": recap_text})
+
+        # Append recent raw turns (truncated slightly to guarantee no tool bloat)
+        for msg in recent_history:
+            content = msg["content"]
+            # Cap previous assistant messages so past large outputs don't flood the planner
+            if msg["role"] == "assistant" and len(content) > 300:
+                content = content[:300] + "... [prior findings summarized]"
+            planner_messages.append({"role": msg["role"], "content": content})
+
+        # Append the actual new user query
+        planner_messages.append(current_user_msg)
+        return planner_messages
 
 
     def add_message(self, role: str, content: str, save_to_db: bool = True):
@@ -140,23 +185,24 @@ class MultiAgentOrchestrator:
 
     def chat(self) -> SupervisorDecision:
         """Sends sanitized context history to Ollama and parses structured JSON output."""
-        self._update_system_message()
+        options = {
+            "temperature": 0.0,  # Low temperature reduces branching & deliberation
+            "num_predict": 300,  # Strict token ceiling (plans never exceed ~400 tokens)
+            "num_ctx": 4096,  # Avoid unnecessarily bloated 16k/32k buffers for planner
+        }
+
+        planner_messages = self._build_planner_messages(max_recent_turns=2)
 
         response = self.client.chat(
             model=self.model,
-            format=SupervisorDecision.model_json_schema(),
-            messages=self.message_history,
-            options={"temperature": 0.0},
+            format="json",
+            messages=planner_messages,
+            options=options,
             keep_alive="30m"
         )
 
         raw_result = response.message.content or "{}"
         cleaned_result = self._clean_json_output(raw_result)
-
-        self.add_message(
-            role="assistant",
-            content=cleaned_result
-        )
 
         try:
             return SupervisorDecision.model_validate_json(cleaned_result)
@@ -186,11 +232,9 @@ class MultiAgentOrchestrator:
         session_title = self.memory.get_session_title(session_id=self.session_id)
 
         if session_title is None:
-            session_title = self.memory.generate_title_from_prompt(
-                client=self.client,
-                model_name=self.model,
-                prompt=user_query,
-            )
+            # 1. Instantly use a lightweight slice as the placeholder title (0ms delay!)
+            fallback_title = user_query.strip().split("\n")[0][:30].strip()
+            session_title = fallback_title
 
             self.memory.save_session(
                 session_id=self.session_id,
@@ -201,20 +245,53 @@ class MultiAgentOrchestrator:
                 event=NovaEvent(
                     event_type="session_created",
                     content="🆕 New Session Title Generated\n"
-                            f"🆔: {self.session_id}"
+                            f"🆔: {self.session_id}\n"
                             f"Title: {session_title}",
                     data={
                         "user_query": user_query,
                         "session_id": self.session_id,
-                        "session_title": session_title,
+                        "session_title": fallback_title,
                     },
                 )
             )
+
+            # 2. Fire the LLM title generation in a background thread
+            def _on_refined_title(new_title: str):
+                self._emit(
+                    event=NovaEvent(
+                        event_type="session_updated",
+                        content=f"Updated session to | `{new_title}`",
+                        data={
+                            "session_id": self.session_id,
+                            "session_title": new_title,
+                        },
+                    )
+                )
             # print(f"📝 New Session Title Generated: '{self.session_id}'")
 
-        self.session_title = session_title
-        # Save user query to persistent SQLite memory
+            self.memory.generate_title_in_background(
+                client=self.client,
+                model_name=self.model,
+                prompt=user_query,
+                session_id=self.session_id,
+                on_title_generated=_on_refined_title,
+            )
+        else:
+            self.session_title = session_title
+
+        # Proceed directly to planning without waiting for title LLM!
         self.add_message(role="user", content=user_query)
+
+        self._emit(
+            event=NovaEvent(
+                event_type="plan_started",
+                content="Analyzing user request and drafting execution plan...",
+                data={
+                    "session_id": self.session_id,
+                    "user_query": user_query,
+                },
+            )
+        )
 
         # -------------------------------------------------------------
         # 1. SUPERVISOR PLANNING & DELEGATION TURN
@@ -374,36 +451,43 @@ class MultiAgentOrchestrator:
         )
 
         synthesis_messages = [
-            {"role": "system", "content": self._build_supervisor_prompt()},
+            {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
             {
                 "role": "user",
                 "content": (
                     f"Original User Query: {user_query}\n\n"
                     f"Team Findings:\n{all_findings}\n\n"
-                    "SYNTHESIS GUIDELINES:\n"
-                    "- If a subtask has status 'BLOCKED' or 'SKIPPED', explicitly report that the action (such as saving a file or plotting) was aborted/denied.\n"
-                    "- NEVER state that a file was saved or created if its generation subtask was BLOCKED.\n"
-                    "- Directly integrate today's date/time from SYSTEM RUNTIME CONTEXT if the user asked for it.\n\n"
-                    "Provide your final ACTION: 'SYNTHESIZE' with the comprehensive 'FINAL_ANSWER'."
                 ),
             },
         ]
 
-        synthesis_response = self.client.chat(
+        stream = self.client.chat(
             model=self.model,
-            format=SupervisorDecision.model_json_schema(),
             messages=synthesis_messages,
-            options={"temperature": 0.0},
+            options={
+                "temperature": 0.2,
+                "num_predict": 1024,
+            },
+            keep_alive="30m",
+            stream=True,
         )
 
-        synth_cleaned = self._clean_json_output(
-            synthesis_response.message.content or "{}"
-        )
-        try:
-            synth_decision = SupervisorDecision.model_validate_json(synth_cleaned)
-            final_text = synth_decision.FINAL_ANSWER or synth_cleaned
-        except ValidationError:
-            final_text = synth_cleaned
+        collected_chunks = []
+        for chunk in stream:
+            content = chunk.message.content or ""
+            collected_chunks.append(content)
+            self._emit(
+                event=NovaEvent(
+                    event_type="synthesis_chunk",
+                    content=content,
+                    data={
+                        "session_id": self.session_id,
+                        "user_query": user_query,
+                    },
+                )
+            )
+
+        final_text = "".join(collected_chunks).strip()
 
         self._emit(
             event=NovaEvent(

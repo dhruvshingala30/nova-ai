@@ -198,6 +198,7 @@ class BaseSpecialistAgent:
                 format=OutputFormat.model_json_schema(),
                 messages=messages,
                 options={"temperature": 0.0},
+                keep_alive="30m"
             )
 
             raw_content = response.message.content or "{}"
