@@ -1,3 +1,10 @@
+"""app/tools/workspace_inspector.py - Workspace File Inspection and Multi-Modal Analysis Tools.
+
+Provides sandboxed, path-traversal-guarded agent utilities to explore workspace
+directories, inspect tabular data (CSV/TSV), parse PDF document metadata,
+and analyze visual assets using local vision LLMs.
+"""
+
 import base64
 import sys
 from pathlib import Path

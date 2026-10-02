@@ -1,3 +1,9 @@
+"""app/core/event.py - Nova AI Core Event Data Model.
+
+Defines the standard NovaEvent dataclass used across internal agent pipelines,
+event collectors, and client-facing streaming interfaces.
+"""
+
 from dataclasses import dataclass, field
 from typing import Any
 

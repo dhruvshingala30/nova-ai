@@ -1,3 +1,9 @@
+"""rag/ingest_pdf.py - PDF Ingestion and Vector Embedding Pipeline.
+
+Handles document extraction via pdfplumber, recursive semantic text chunking,
+and batch indexing into a persistent ChromaDB vector store using SentenceTransformers.
+"""
+
 import os
 from pathlib import Path
 from typing import Any

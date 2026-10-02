@@ -1,3 +1,9 @@
+"""app/core/event_bus.py - Asynchronous Event Bus and Dispatch Bridge.
+
+Provides the EventCollector utility to safely forward synchronous or
+cross-thread agent events into an active asyncio.Queue within a running event loop.
+"""
+
 import asyncio
 from pathlib import Path
 
