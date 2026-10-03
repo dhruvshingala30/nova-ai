@@ -187,8 +187,6 @@ nova-ai/
 ├── frontend/
 │   └── app/
 │
-├── node_modules/
-│
 ├── nova_workspace/
 │
 ├── rag/
@@ -203,8 +201,6 @@ nova-ai/
 ├── .gitignore
 ├── docker-compose.yml
 ├── Dockerfile
-├── package-lock.json
-├── package.json
 ├── README.md
 ├── requirements.txt
 └── sandbox.dockerfile
