@@ -1,655 +1,162 @@
 # 🚀 Nova AI
 
-> A modular Agentic AI framework that reasons, remembers, retrieves knowledge,
-> understands multimodal inputs, analyzes data, executes code safely,
-> collaborates through specialized agents, and uses external tools through
-> local LLMs.
+> An end-to-end, production-grade Agentic AI platform featuring asynchronous
+> Server-Sent Events (SSE) streaming, Docker-sandboxed execution, multi-agent
+> collaboration, hybrid RAG with HyDE and Reciprocal Rank Fusion (RRF),thread-safe
+> Human-in-the-Loop (HITL) controls, and an interactive Next.js 15 interface.
 
-Nova AI is an extensible AI Agent built with Python and local LLMs. Instead
-of relying only on language generation, Nova AI can reason about a user's
-request, plan and decompose complex tasks, select appropriate tools or
-specialized agents, execute them, observe their results, and synthesize
-grounded final responses.
-
-The project is being developed incrementally to understand and implement the
-core building blocks of modern AI agents from first principles.
+Nova AI is an extensible AI Agent framework built from first principles using
+Python, FastAPI, and local LLMs (via Ollama). Rather than relying on rigid
+abstractions or wrapping simple prompt chains, Nova AI directly implements
+reasoning, dynamic tool selection, multi-agent supervision, safe code execution,
+persistent cross-session memory, and live stream coordination.
 
 ---
 
-## ✨ Current Features
+## 🏗️ System Architecture & Data Flow
 
-### 🌤️ Weather Tool
-
-Ask for the weather of one or multiple cities.
-
-#### Examples - Weather Tool
+Nova AI connects an asynchronous web layer, an event bus, persistent memory,
+and isolated execution sandboxes across a clean client-server boundary:
 
 ```text
-What's the weather in Ahmedabad?
-```
-
-```text
-Compare the weather of Mumbai, Delhi and Bangalore.
-```
-
-The agent automatically:
-
-- Identifies the requested cities
-- Calls the weather API
-- Synthesizes the response into natural language
-
----
-
-### 🌐 Web Search Tool
-
-Nova AI can search the web whenever real-time or external information is required.
-
-Powered by the Tavily Search API, the agent retrieves relevant sources and generates grounded responses.
-
-#### Examples - Web Search Tool
-
-```text
-Latest AI news
-```
-
-```text
-Who won the latest Formula 1 race?
-```
-
-```text
-Summarize today's NVIDIA announcements.
-```
-
-The agent automatically:
-
-- Detects when internal knowledge is insufficient
-- Performs a web search
-- Retrieves relevant sources
-- Produces a concise, factual response
-
----
-
-### 🧠 Persistent Memory
-
-Nova AI remembers important information from previous conversations using SQLite, allowing it to retain relevant information across sessions.
-
-Instead of treating every interaction as brand new, the agent can recall previously stored information whenever it is relevant.
-
-#### Examples - Persistent Memory
-
-```text
-Remember that my favorite programming language is Python.
-```
-
-```text
-What's my favorite programming language?
-```
-
-```text
-Remember that I'm preparing for AI Engineer interviews.
-```
-
-The agent automatically:
-
-- Extracts important long-term information
-- Stores it in a SQLite database
-- Retrieves relevant memories when needed
-- Uses retrieved memories to produce personalized responses
-
----
-
-### 📁 Shared File Workspace & Data Analysis
-
-Nova AI provides a dedicated `nova_workspace` directory for working with user-provided files.
-
-The workspace is created and managed automatically by the `WorkspaceManager`, allowing file-related operations to remain inside a dedicated workspace.
-
-The workspace system provides:
-
-- A dedicated `nova_workspace` directory
-- Safe relative-path resolution
-- Protection against path traversal
-- Workspace file discovery and metadata inspection
-- CSV and TSV schema inspection
-- PDF content inspection
-- Integration with the Local RAG Engine for semantic document retrieval
-- Integration with the Python Code Execution Engine for data analysis
-
-#### Workspace File Discovery
-
-The `list_workspace_files` tool allows Nova AI to inspect the contents of the workspace and identify available files.
-
-For each file, the agent can determine:
-
-- Filename
-- File extension
-- File size
-
-#### CSV / TSV Inspection
-
-The `inspect_csv_schema` tool processes CSV and TSV files using Pandas and provides the LLM with:
-
-- Column names
-- Data types
-- Sample rows
-
-The inspected dataset can then be passed to the Code Execution Engine for further calculations, analysis, and visualization.
-
-#### Examples - Shared File Workspace & Data Analysis
-
-```text
-You:
-What files are in my workspace?
-
-Nova AI:
-The files in the workspace are:
-
-- users.csv (67 B)
-- happy.csv (5.7 KB)
-```
-
-```text
-You:
-Can you inspect happy.csv?
-
-Nova AI:
-The happy.csv file contains the following columns and data types:
-
-- country: str
-- happiness: int64
-- gdp: int64
-- social_support: int64
-- life_expectancy: int64
-- freedom_to_make_life_choices: int64
-- generosity: int64
-- corruption: int64
-```
-
-After inspecting the dataset, Nova AI can use the Code Execution Engine to perform calculations, statistical analysis, and visualizations.
-
----
-
-### 👀 Workspace Auto-Ingestion
-
-Nova AI now includes a workspace file watcher that monitors the `nova_workspace` directory for newly added or modified files.
-
-The `WorkspaceWatcher` automatically detects workspace changes and can trigger the document ingestion pipeline without requiring manual ingestion commands for every new file.
-
-This creates a more seamless workflow:
-
-```text
-User Adds File
-      │
-      ▼
-nova_workspace/
-      │
-      ▼
-Workspace Watcher
-      │
-      ▼
-File Type Detection
-      │
-      ├── CSV / TSV
-      │       ↓
-      │   Data Analysis
-      │
-      └── PDF / Document
-              ↓
-          RAG Ingestion
-              │
-              ▼
-          Vector Database
-```
-
-The watcher allows the workspace to behave more like a continuously available knowledge and data environment rather than a static directory.
-
-The runtime logs confirm that workspace monitoring is active:
-
-```text
-[Workspace Watcher] Auto-ingestion active on: /app/nova_workspace
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                      Frontend: Next.js 15 + Tailwind CSS                    │
+│                      (Hosted at http://localhost:3000)                      │
+└──────────────┬──────────────────────────────┬───────────────────────────────┘
+               │ POST /api/chat               │ GET /api/chat/:id/events (SSE)
+               ▼                              ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                        FastAPI Application Gateway                          │
+│                        (Hosted at http://localhost:8000)                    │
+│                                                                             │
+│   ├── routes/chat.py ─────────► SessionEventManager (asyncio.Queue)         │
+│   ├── routes/conversations.py ─► SQLiteMemory (Persistent Sessions)         │
+│   └── HITLManager ────────────► threading.Event (Approval Interlock)        │
+└─────────────────────────────────────┬───────────────────────────────────────┘
+                                      │ asyncio.to_thread
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                 MultiAgentOrchestrator (Supervisor Loop)                    │
+│                                                                             │
+│   Shared Context / Blackboard Bus ◄─────────► Plan & Decompose Engine       │
+└──────┬──────────────────────┬──────────────────────┬────────────────────────┘
+       │                      │                      │
+       ▼                      ▼                      ▼
+┌──────────────┐       ┌──────────────┐       ┌───────────────────────────────┐
+│ResearchAgent │       │DataAnalyst   │       │DocVisionAgent                 │
+│(Web/Weather) │       │(Python/Pandas│       │(ChromaDB RAG / LLaVA Vision)  │
+└──────┬───────┘       └──────┬───────┘       └──────┬────────────────────────┘
+       │                      │                      │
+       ▼                      ▼                      ▼
+┌──────────────┐       ┌──────────────┐       ┌───────────────────────────────┐
+│Tavily / wttr │       │Docker Sandbox│       │ChromaDB + BM25 (RRF + HyDE)   │
+│Search Tools  │       │(Python 3.11) │       │Ollama Multimodal Engine       │
+└──────────────┘       └──────────────┘       └───────────────────────────────┘
 ```
 
 ---
 
-### 📄 PDF Inspection & Parsing
+## ✨ Key Features & Architectural Highlights
 
-Nova AI can inspect PDF files stored inside the shared workspace and extract useful document-level information.
+### ⚡️ Asynchronous Server-Sent Events (SSE) Streaming
 
-The `inspect_pdf_schema` tool provides the LLM with structured information about a PDF, including:
+- **Non-Blocking Task Dispatch**: Dispatches long-running agent workflows
+  via `asyncio.to_thread` and `asyncio.create_task`, allowing the API to
+  return immediate acknowledgments (`status: "started"`).
+- **Live Token & Event Streaming**: Bridges internal `NovaEvent` objects
+  into an in-memory `asyncio.Queue` via `EventCollector`, pushing thoughts,
+  tool execution steps, and tokens over a `text/event-stream` connection.
 
-- Total page count
-- PDF metadata
-- Document title
-- Author information
-- Creator information
-- Sample text extracted from selected pages
+### 🛡️ Human-in-the-Loop (HITL) Concurrency Bridge
 
-PDF inspection forms the document-processing layer of Nova AI, while the Local RAG Engine builds on this capability to index PDF content and retrieve relevant information semantically.
+- **Thread-Safe Pause & Resume**: When an agent attempts an action flagged as
+  sensitive or destructive, it pauses its worker thread using a `threading.Event`.
+- **Zero Event-Loop Blockage**: The FastAPI async event loop remains fully responsive
+  to incoming health checks and requests while the worker thread awaits approval.
+- **UI Resolution & Auto-Denial**: Operators approve or deny operations via
+  `POST /api/chat/{session_id}/approval`, with an automatic 300-second
+  timeout default to deny unacknowledged tasks.
 
-#### Example - PDF Inspection
+### 🤝 Multi-Agent Supervision & Worker Network
 
-```text
-You:
-Inspect Trading in the Zone by Mark Douglas.pdf
+- **Supervisor Agent (`MultiAgentOrchestrator`)**: Performs intent classification,
+  breaks down multi-step tasks into sub-plans, and delegates them to specialized workers.
+- **Research Agent**: Collects live external knowledge via Tavily web search and
+  structured `wttr.in` weather data.
+- **Data Analyst Agent**: Generates Python scripts and executes data science workflows
+  with Pandas, NumPy, Matplotlib, and SymPy inside an isolated container.
+- **Document & Vision Specialist**: Ingests files, runs hybrid vector-keyword retrieval (RAG),
+  and visually inspects images/charts with local vision models.
 
-Nova AI:
-The file 'Trading in the zone by Mark Douglas.pdf' contains the following details:
+### 🔬 Advanced Hybrid RAG Engine
 
-- Total Pages: 143
-- Metadata:
-  - Title: Trading in the Zone
-  - Author: MaVeRiCk
-  - Creator: calibre (5.17.0)
-- Sample Text from Page 1:
-  TRADING IN THE ZONE
-- Sample Text from Page 2:
-  MASTER THE MARKET WITH CONFIDENCE, DISCIPLINE AND A WINNING ATTITUDE...
-```
+- **HyDE (Hypothetical Document Embeddings)**: Generates a theoretical answer to map ambiguous
+  queries into the embedding document space.
+- **Dense Vector Search**: Powered by ChromaDB and `SentenceTransformers` (`all-MiniLM-L6-v2`).
+- **Lexical Keyword Search**: Powered by Rank-BM25 to guarantee exact keyword matches.
+- **Reciprocal Rank Fusion (RRF)**: Combines dense vector rankings with sparse keyword
+  rankings to deliver grounded context.
 
-The PDF inspection feature handles document-level metadata and text extraction, while the Local RAG Engine handles semantic indexing and retrieval from processed PDF content.
+### 🐳 Sandboxed Code Execution & Workspace Guardrails
 
----
+- **Isolated Docker Runtime**: Executes arbitrary code safely inside a custom
+  `nova-sandbox:latest` container with memory and timeout limits.
+- **Path-Traversal Guards**: `WorkspaceManager` verifies and resolves all relative paths within
+  `nova_workspace/` to protect host filesystem integrity.
+- **Smart Output Capping**: Truncates large DataFrames and matrix prints to prevent context-window overflow.
 
-### 🔎 Local RAG Engine
+### 📡 API Reference
 
-Nova AI includes a local Retrieval-Augmented Generation (RAG) pipeline for querying indexed PDF documents.
+Nova AI's FastAPI gateway exposes the following REST and streaming endpoints:
 
-The RAG engine uses:
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `GET` | `/` | Health-check endpoint verifying API server status. |
+| `POST` | `/api/chat` | Dispatches query asynchronously to agent orchestrator; returns session acknowledgment. |
+| `GET` | `/api/chat/{session_id}/events` | Real-time SSE stream yielding thoughts, tool logs, and agent tokens (`text/event-stream`). |
+| `POST` | `/api/chat/{session_id}/approval` | Resolves thread-locked HITL confirmation (`approved=true/false`). |
+| `GET` | `/api/conversations` | Lists stored conversation sessions and metadata from SQLite storage. |
+| `GET` | `/api/conversations/{session_id}` | Retrieves full turn-by-turn chat history for a session. |
 
-- ChromaDB for persistent vector storage
-- Sentence Transformers for semantic embeddings
-- LangChain Text Splitters for document chunking
-- pdfplumber for PDF text extraction
-
-The `ingest_pdf.py` pipeline extracts text from PDF documents, splits the content into manageable chunks, generates embeddings, and stores the resulting vectors in a local ChromaDB collection.
-
-The `search_knowledge_base` tool performs semantic similarity search against the indexed knowledge base and provides the most relevant document context to the LLM.
-
-The initial RAG implementation uses dense semantic retrieval with ChromaDB.
-This foundation has been extended with hybrid retrieval using BM25, RRF,
-and HyDE.
-
----
-
-### 🔬 Advanced RAG Retrieval
-
-Nova AI's RAG architecture uses a hybrid retrieval pipeline that combines
-dense semantic retrieval, BM25 lexical search, Reciprocal Rank Fusion (RRF),
-and HyDE.
-
-The enhanced retrieval architecture combines:
-
-- Dense semantic retrieval using ChromaDB
-- BM25 lexical retrieval
-- Reciprocal Rank Fusion (RRF)
-- HyDE (Hypothetical Document Embeddings)
-
-The enhanced retrieval pipeline combines semantic similarity with
-keyword-based relevance, improving retrieval quality for both conceptual
-questions and queries containing specific terminology.
-
-The enhanced retrieval flow is:
-
-```text
-                          User Query
-                              │
-                    ┌─────────┴─────────┐
-                    │                   │
-                    ▼                   ▼
-                   HyDE            Original Query
-                    │                   │
-                    ▼                   ▼
-          Hypothetical Document        BM25
-                    │                   │
-                    ▼                   │
-             Dense Retrieval            │
-                    │                   │
-                 ChromaDB               │
-                    │                   │
-                    └─────────┬─────────┘
-                              ▼
-                    Reciprocal Rank Fusion
-                            (RRF)
-                              │
-                              ▼
-                        Ranked Context
-                              │
-                              ▼
-                          Local LLM
-                              │
-                              ▼
-                        Grounded Answer
-```
-
-#### Example - RAG Response
-
-```text
-You:
-What does Mark Douglas say about market probabilities and risk?
-
-Nova AI:
-Mark Douglas emphasizes that trading requires a different mindset compared
-to other aspects of life where we typically rely on skills learned over time.
-He explains that traders must learn to think in terms of probabilities and
-be willing to surrender conventional skills they have acquired in their
-daily lives.
-```
-
-Nova AI retrieves relevant context from the locally indexed PDF before generating the answer.
-
-The RAG engine allows Nova AI to answer questions using information retrieved from locally indexed documents rather than relying solely on the LLM's pre-trained knowledge.
+Interactive Swagger documentation is automatically hosted at `http://localhost:8000/docs`.
 
 ---
 
-### 🐍 Code Execution Engine
-
-Nova AI includes a Docker-powered Code Execution Engine that enables the LLM to generate and execute Python code inside an isolated sandbox.
-
-Instead of relying on dozens of manually implemented mathematical tools, Nova AI can generate Python code dynamically whenever a complex computational task is required.
-
-The engine supports:
-
-- Complex mathematical calculations
-- Statistical and scientific computations
-- Data manipulation and analysis
-- Mathematical operations using SymPy
-- Numerical computations using NumPy and SciPy
-- Data analysis using Pandas
-- Data visualization using Matplotlib and Seaborn
-- Processing data from the shared workspace
-
-#### Examples - Mathematical & Computational Tasks
-
-```text
-What is (245 × 97) / 13?
-```
-
-```text
-Find the factorial of 100.
-```
-
-```text
-Generate the first 50 Fibonacci numbers.
-```
-
-```text
-Calculate the determinant of this matrix:
-[[3, 5], [7, 2]]
-```
-
-```text
-Solve this system of equations:
-
-2x + 3y = 12
-4x - y = 5
-```
-
-The agent automatically:
-
-- Determines when computation is required
-- Generates Python code
-- Executes the code inside Docker
-- Observes the output
-- Returns the final answer
-
-#### Docker Sandbox
-
-The Code Execution Engine executes generated Python code inside a dedicated Docker image named `nova-sandbox:latest`.
-
-The sandbox includes commonly used Python and data-science libraries pre-installed, including:
-
-- Pandas
-- NumPy
-- Matplotlib
-- Seaborn
-- SymPy
-- SciPy
-
-Pre-installing these libraries allows generated code to execute without installing packages at runtime.
-
-The execution environment also provides additional restrictions around generated code and system access, while the Docker container provides the primary isolation boundary for untrusted execution.
-
-Generated code is executed inside the sandbox and the execution environment is removed after the task completes.
-
-#### How the Code Execution Engine Is Used
-
-The Code Execution Engine can be used directly for computational tasks or together with the Shared File Workspace for data-analysis tasks.
-
-```text
-User Request
-     │
-     ├── "Calculate determinant"
-     │          ↓
-     │    Code Execution Engine
-     │
-     ├── "Solve equations"
-     │          ↓
-     │    Code Execution Engine
-     │
-     ├── "Analyze happy.csv"
-     │          ↓
-     │    Workspace → Code Execution Engine
-     │
-     └── "Plot GDP vs Happiness"
-                ↓
-          Workspace → Code Execution Engine
-```
-
-This allows the same execution engine to handle both general-purpose computation and analysis of user-provided datasets.
-
----
-
-#### Smart Execution Output
-
-Nova AI applies output controls to prevent large Python executions from overwhelming the LLM context.
-
-The Code Execution Engine can intelligently cap:
-
-- Excessive stdout output
-- Large DataFrame displays
-- Oversized tabular results
-- Unnecessary intermediate execution output
-
-This allows Nova AI to work with large datasets and verbose Python programs while keeping the information passed back to the LLM compact and useful.
-
-Instead of returning an entire dataset or thousands of printed lines, the execution layer provides a controlled representation of the result.
-
----
-
-### 📋 Multi-Step Planning
-
-Decomposes complex, multi-action queries into structured subtasks before calling tools.
-
----
-
-### 💡 Autonomous Reflection & Error Recovery
-
-Self-corrects when tool executions fail (e.g., missing data, syntax errors, or schema mismatches).
-
----
-
-### 🛡️ Dynamic Human-in-the-Loop (HITL)
-
-Automatically intercepts destructive disk writes, deletions, or file updates and requests human confirmation before proceeding.
-
----
-
-## 🧠 How Nova AI Works
-
-```text
-                    User
-                     │
-                     ▼
-                  Qwen LLM
-                     │
-              ┌──────┴──────┐
-              │             │
-              ▼             ▼
-       Single-Agent      Supervisor
-        Tool Loop          Agent
-              │             │
-              │       ┌─────┼─────┐
-              │       ▼     ▼     ▼
-              │    Research Data  ...
-              │     Agent  Agent
-              │       │     │
-              └───────┴─────┘
-                      │
-                      ▼
-                 Observations
-                      │
-                      ▼
-                  Qwen LLM
-                      │
-                      ▼
-                 Final Answer
-```
-
-The agent architecture is responsible for:
-
-- Understanding user intent
-- Determining whether a single-agent or multi-agent workflow is required
-- Planning and decomposing complex tasks
-- Selecting appropriate tools and specialist agents
-- Passing structured arguments
-- Observing tool and agent outputs
-- Combining intermediate results
-- Reflecting and recovering from failures
-- Synthesizing the final response
-
----
-
-## 🛠️ Tech Stack
-
-### 🤖 AI & Agent Core
-
-- Ollama
-- Qwen 2.5 7B
-- LLaVA
-- Pydantic
-- AnyIO
-- HTTPX
-
-### 🌐 APIs & External Services
-
-- Tavily Python SDK
-- Requests
-- python-dotenv
-
-### 🧠 Memory & Retrieval
-
-- SQLite
-- ChromaDB
-- Sentence Transformers
-- rank-bm25
-
-### 📄 Document Processing
-
-- pypdf
-- pdfplumber
-- LangChain Text Splitters
-
-### 📊 Data Analysis & Visualization
-
-- Pandas
-- NumPy
-- Matplotlib
-- SymPy
-
-### 🐳 Code Execution & Workspace
-
-- Docker
-- Watchdog
-
-#### Local Models
-
-- **Qwen 2.5 7B** — Primary reasoning and agent orchestration model
-- **LLaVA** — Vision and multimodal image understanding model
-- **Ollama** — Local runtime for serving and interacting with both models
-
-### 🏗️ Architecture
-
-- Local LLM inference with Ollama
-- Tool Calling & Dynamic Tool Routing
-- Multi-Agent Collaboration with Supervisor/Worker Agents
-- ReAct Planning & Reflection
-- Pydantic Input Validation
-- Persistent SQLite Memory
-- Local Vector Database
-- Hybrid Retrieval
-- HyDE
-- Reciprocal Rank Fusion (RRF)
-- Automatic Workspace File Monitoring
-- Docker-isolated Python Code Execution
-- Multimodal Vision with LLaVA
-- Automated Agent Evaluation
-- Human-in-the-Loop Safeguards
-- Observation-driven Tool Result Synthesis
-
----
-
-## 🧩 Current Capabilities
-
-Nova AI currently provides:
-
-- 🌤️ Real-time weather information
-- 🌐 Web search
-- 🧠 Persistent SQLite memory
-- 📁 Shared workspace management
-- 👀 Automatic workspace file monitoring
-- 📊 CSV / TSV inspection and analysis
-- 📄 PDF inspection and parsing
-- 🖼️ Multimodal image understanding
-- 🤝 Supervisor-based multi-agent collaboration
-- 👥 Specialized agent delegation and result synthesis
-- 🔎 Local semantic RAG
-- 🔬 Hybrid RAG with Dense + BM25 retrieval
-- 🔀 Reciprocal Rank Fusion (RRF)
-- 🧠 HyDE query enhancement
-- 🧮 General-purpose mathematical problem solving through Python
-- 🐍 Dynamic Python code generation and execution
-- 🐳 Docker-isolated code execution
-- 📉 Smart execution-output capping
-- 📚 Local vector knowledge storage
-- 🔗 Multi-tool result synthesis
-- 🧠 Observation-driven final answer generation
-- 📋 Multi-step ReAct task planning and decomposition
-- 💡 Autonomous reflection and self-correction on tool failures
-- 🛡️ Dynamic Human-in-the-Loop confirmation for workspace modifications
-- 🧪 Automated evaluation test suite for agent routing and safety
-
----
-
-## 🛡️ Reliability & Safety
-
-Nova AI is being designed with reliability and controlled execution as first-class concerns.
-
-Current safeguards include:
-
-- Docker-isolated Python execution
-- Workspace path traversal protection
-- Controlled Python execution output
-- DataFrame output capping
-- Structured tool inputs using Pydantic
-- Workspace monitoring and controlled ingestion
-- Automated agent evaluation
-- Human-in-the-loop approval for sensitive operations
-- Planning and reflection
-- Tool execution validation
-
----
-
-## 📂 Project Structure
+## 📂 Project Directory Structure
 
 ```text
 nova-ai/
-├── app/
-│   ├── agents/                     # Multi-Agent Worker Implementations
+├── api/                            # FastAPI HTTP & Real-Time Gateway
+│   ├── core/                       # Concurrency managers (HITL, session event queues)
+│   │   ├── __init__.py
+│   │   ├── hitl_manager.py
+│   │   └── session_events.py       
+│   │
+│   ├── routes/                     # Route handlers (/chat, /conversations)
+│   │   ├── __init__.py
+│   │   ├── chat.py
+│   │   └── conversations.py
+│   │
+│   ├── schemas/                    # Pydantic request/response validation schemas
+│   │   ├── __init__.py
+│   │   ├── chat.py
+│   │   └── conversations.py
+│   │
+│   ├── services/                   # Orchestrator and persistent memory service bridges
+│   │   ├── __init__.py
+│   │   ├── conversation_service.py
+│   │   └── nova_services.py
+│   │
+│   ├── __init__.py
+│   └── main.py                     # FastAPI entry point & CORS configuration
+│
+├── app/                            # Core Agent Engine & Logic
+│   ├── agents/                     # Multi-agent worker nodes (BaseAgent, Specialists)
 │   │   ├── __init__.py
 │   │   ├── base_agent.py           # Base specialist abstraction
 │   │   └── specialists.py          # ResearchAgent, DataAnalystAgent, DocVisionAgent
 │   │
-│   ├── core/
+│   ├── core/                       # Memory (SQLite), EventBus, SharedContext, Workspace
 │   │   ├── __init__.py
 │   │   ├── hyde.py                 # HyDE query generation
 │   │   ├── memory.py               # Persistent SQLite memory
@@ -657,7 +164,7 @@ nova-ai/
 │   │   ├── workspace_manager.py    # Workspace sandbox management
 │   │   └── workspace_watcher.py    # Automatic file monitoring
 │   │
-│   ├── tools/
+│   ├── tools/                      # CodeInterpreter, WebSearch, Inspection, RAG Search
 │   │   ├── __init__.py
 │   │   ├── code_interpreter.py
 │   │   ├── knowledge_base_search.py
@@ -665,17 +172,22 @@ nova-ai/
 │   │   ├── web_search.py
 │   │   └── workspace_tools.py
 │   │
-│   ├── config.py
+│   ├── config.py                   # Environment settings and model constants
 │   ├── main.py
-│   ├── models.py                   # Pydantic Schemas & Agent Contracts
-│   ├── orchestrator.py             # Multi-Agent Supervisor / Orchestrator
+│   ├── models.py                   # Structured Pydantic tools and agent models
+│   ├── orchestrator.py             # Multi-Agent Supervisor / Orchestration loop
 │   ├── prompts.py
-│   ├── single_agent.py              # Standalone ReAct Single-Agent Engine
+│   ├── single_agent.py             # Standalone ReAct Single-Agent Loop
 │   └── utils.py
 │
 ├── data/
 │   ├── vector_db/
 │   └── nova_memory.db
+│
+├── frontend/
+│   └── app/
+│
+├── node_modules/
 │
 ├── nova_workspace/
 │
@@ -690,7 +202,9 @@ nova-ai/
 ├── .env.example
 ├── .gitignore
 ├── docker-compose.yml
-├── dockerfile
+├── Dockerfile
+├── package-lock.json
+├── package.json
 ├── README.md
 ├── requirements.txt
 └── sandbox.dockerfile
@@ -702,26 +216,43 @@ nova-ai/
 
 ---
 
+## 🛠️ Tech Stack
+
+- **LLM & Vision Runtime**: Ollama (`qwen2.5:7b`, `llava`).
+- **Backend Core**: Python 3.11+, FastAPI, Uvicorn, Pydantic v2, AnyIO, asyncio.
+- **Frontend**: Next.js 15 (App Router, React 19), TypeScript, Tailwind CSS.
+- **RAG & Vector Search**: ChromaDB, SentenceTransformers (`all-MiniLM-L6-v2`),
+  Rank-BM25, LangChain Text Splitters, pdfplumber.
+- **Data Science & Sandboxing**: Docker, Pandas, NumPy, Matplotlib, Seaborn, SymPy, Watchdog.
+- **Memory & Storage**: SQLite3.
+
+---
+
 ## 🚀 Getting Started
 
-### Clone the Repository
+### Prerequisites
+
+- Python 3.11+
+- Node.js 18+ & npm
+- Docker Desktop (Required for isolated code interpreter)
+- Ollama
+
+### 1. Clone the Repository
 
 ```bash
 git clone https://github.com/dhruvshingala30/nova-ai.git
 cd nova-ai
 ```
 
-### Install Dependencies
+### 2. Configure Environment Variables
 
-```bash
-pip install -r requirements.txt
-```
-
-### Configure Environment Variables
-
-Create a `.env` file in the project root.
+Create `.env` in the project root:
 
 ```text
+ENVIRONMENT=development
+OLLAMA_HOST=http://localhost:11434
+MODEL_NAME=qwen2.5:7b
+VISION_MODEL_NAME=llava
 TAVILY_API_KEY=your_tavily_api_key
 ```
 
@@ -734,13 +265,69 @@ To obtain a Tavily API key:
 
 > **Note:** The Weather Tool uses the free `wttr.in` service and does not require an API key.
 
-### Pull the Model
+### 3. Pull Required Models via Ollama
 
 ```bash
-ollama pull qwen2.5:7b llava
+ollama pull qwen2.5:7b-instruct-q8_0
+ollama pull llava
 ```
 
 > **Note:** The first RAG query may download the configured Sentence Transformers embedding model from Hugging Face. Subsequent runs use the locally cached model.
+
+### 4. Install Dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### 5. Build Code Execution Sandbox
+
+Build the container image used for secure script execution:
+
+```bash
+docker build -f sandbox.dockerfile -t nova-sandbox:latest .
+```
+
+### 6. Ingest Knowledge Base Documents (Optional RAG Setup)
+
+Place reference documents (e.g. `manual.pdf`) into `nova_workspace/` and run the vector ingestion pipeline:
+
+```bash
+python rag/ingest_pdf.py
+```
+
+---
+
+## 💻 Running the Application
+
+### Option A: Local Development (Recommended)
+
+**Terminal 1 — FastAPI Backend Gateway:**
+
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn api.main:app --reload --port 8000
+```
+
+**Terminal 2 — Next.js Frontend UI:**
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:3000` in your browser to interact with Nova AI.
+
+### Option B: Docker Compose
+
+Spin up the containerized architecture with a single command:
+
+```bash
+docker compose up --build
+```
 
 ### Run Nova AI
 
@@ -748,394 +335,57 @@ ollama pull qwen2.5:7b llava
 python main.py
 ```
 
-### Workspace
-
-Nova AI automatically creates and monitors the `nova_workspace/` directory.
-
-Place supported files inside this directory and the Workspace Watcher will detect changes and trigger the appropriate ingestion or inspection workflow.
-
-```text
-nova-ai/
-└── nova_workspace/
-    ├── data.csv
-    ├── report.pdf
-    └── ...
-```
-
 ---
 
-## 💬 Example Conversations
+## 💬 Interactive Query Examples
 
-### Weather
+### 1. Data Analysis & Chart Generation
 
 ```text
-You:
-What's the weather in Ahmedabad?
+You: 
+Inspect happy.csv from my workspace and plot GDP vs Happiness as a scatter plot.
 
 Nova AI:
-The current weather in Ahmedabad is 31°C with light rain.
+1. Inspected schema of happy.csv (Columns: country, gdp, happiness)
+2. Generated visualization script using Matplotlib inside Docker sandbox
+3. Saved generated chart to nova_workspace/gdp_vs_happiness.png
+4. Inspected chart using LLaVA vision model: Confirmed strong positive correlation
 ```
 
----
-
-### Web Search
+### 2. Multi-Agent Cross-Domain Collaboration
 
 ```text
-You:
-Latest OpenAI announcements
+You: 
+Find the current weather in Tokyo and Berlin, calculate the temperature delta in Python, and tell me which is colder.
 
 Nova AI:
-Here are the latest updates...
+Supervisor formulated 2 subtasks:
+  - Dispatched ResearchAgent: Tokyo = 24°C, Berlin = 14°C
+  - Dispatched DataAnalystAgent: Evaluated abs(24 - 14) = 10°C delta in Docker sandbox
+Synthesized Answer: Berlin is currently colder than Tokyo by 10°C.
 ```
 
----
-
-### Code Execution
+### 3. Human-in-the-Loop File Mutation
 
 ```text
-You:
-What is the determinant of [[2,5],[3,4]]?
+You: 
+Add a 'verified' boolean column to users.csv and overwrite the original file.
 
 Nova AI:
-The determinant is -7.
+⚠️ [HITL SAFEGUARD - HUMAN APPROVAL REQUIRED]
+Action: Overwrite workspace file 'users.csv'
+Tool: run_python_code
+Approve action? [Approve / Deny]
 ```
 
 ---
 
-### Memory
-
-```text
-You:
-Remember that my favorite IDE is VS Code.
-
-Nova AI:
-Got it! I'll remember that your favorite IDE is VS Code.
-
-You:
-What's my favorite IDE?
-
-Nova AI:
-Your favorite IDE is VS Code.
-```
-
----
-
-### Data Analysis
-
-```text
-You:
-What files are in my workspace?
-
-Nova AI:
-The files in the workspace are:
-
-- users.csv (67 B)
-- happy.csv (5.7 KB)
-```
-
-```text
-You:
-Can you inspect happy.csv?
-
-Nova AI:
-The happy.csv file contains the following columns and data types:
-
-- country: str
-- happiness: int64
-- gdp: int64
-- social_support: int64
-- life_expectancy: int64
-- freedom_to_make_life_choices: int64
-- generosity: int64
-- corruption: int64
-```
-
-After inspecting the dataset, Nova AI can pass the relevant information to the Code Execution Engine for further calculations and visualization.
-
----
-
-### PDF Inspection
-
-```text
-You:
-Inspect Trading in the Zone by Mark Douglas.pdf
-
-Nova AI:
-The file contains:
-
-- Total Pages: 143
-- Title: Trading in the Zone
-- Author: MaVeRiCk
-- Creator: calibre (5.17.0)
-- Sample text extracted from the document
-```
-
-The PDF inspection layer extracts document metadata and text that can subsequently be indexed by the RAG pipeline.
-
----
-
-### 🖼️ Vision / Image Understanding
-
-Nova AI can inspect images stored in the shared workspace and use a
-multimodal model to understand their visual content.
-
-The `inspect_image` tool allows the agent to analyze images and describe
-their:
-
-- Charts and graphs
-- Labels and titles
-- Visual trends
-- Tables and structured information
-- General visual content
-
-The image is passed to the vision-capable model, which interprets the
-visual information and returns a structured observation to the agent.
-
-#### Example - Image Inspection
-
-```text
-You:
-What does gdp_vs_happiness.png show?
-
-Nova AI:
-The image `gdp_vs_happiness.png` shows a line chart titled
-'GDP vs Happiness.' The x-axis represents GDP, while the y-axis
-represents the Happiness index. The chart contains visual
-comparisons between GDP and Happiness.
-```
-
----
-
-### Local RAG
-
-```text
-You:
-What does Mark Douglas say about market probabilities and risk?
-
-Nova AI:
-Mark Douglas emphasizes that trading requires a different mindset compared
-to other aspects of life where we typically rely on skills learned over time.
-He explains that traders must learn to think in terms of probabilities and
-be willing to surrender conventional skills they have acquired in their
-daily lives.
-```
-
-Nova AI retrieves relevant context from the locally indexed PDF before generating the answer.
-
----
-
-### Hybrid RAG
-
-```text
-You:
-What does Mark Douglas say about market probabilities and risk?
-
-Nova AI:
-Mark Douglas emphasizes that trading requires a different mindset compared
-to other aspects of life where we typically rely on skills learned over time.
-He explains that traders must learn to think in terms of probabilities and
-be willing to surrender conventional skills they have acquired in their
-daily lives.
-```
-
----
-
-### Workspace Auto-Ingestion
-
-```text
-[Workspace Watcher] Auto-ingestion active on: /app/nova_workspace
-```
-
-Once a supported file is added or modified inside the workspace, Nova AI can detect the change and make the updated content available to its workspace and knowledge workflows.
-
----
-
-### Knowledge Retrieval
-
-```text
-You:
-According to the Mark Douglas book in my workspace, what is the failure rate percentage for traders?
-
-Nova AI:
-According to Mark Douglas in his book 'Trading in the Zone', approximately
-95% of futures traders lose all of their money within the first year of trading.
-```
-
----
-
-### Multi-Step Planning & Human-in-the-Loop (HITL)
-
-```text
-You:
-Add a column 'seniority' to users.csv and save the updated file.
-
-Nova AI:
-📋 : First, I need to inspect the schema of 'users.csv' before adding a new column.
-   1. Step 1: Inspect the schema of 'users.csv'.
-   2. Step 2: Add a new column 'seniority' to the DataFrame.
-   3. Step 3: Save the updated file.
-
-🛠️ : inspect_csv_schema
-🛠️ : run_python_code
-
-⚠️  [HITL SAFEGUARD - HUMAN APPROVAL REQUIRED]
-   Reason: Modifying / writing a CSV file to disk
-   Tool: run_python_code
-   --- Code Preview ---
-   | users_df.to_csv('users.csv', index=False)
-   --------------------
-👉 Approve this workspace modification? (y/n): n
-🚫 Action denied by human operator.
-
-💡 : The operation to modify 'users.csv' on disk was rejected. I will simulate the addition in memory instead.
-🤖 : The column 'seniority' has been added in-memory for users.csv...
-```
-
----
-
-### 🤝 Multi-Agent Collaboration
-
-Nova AI can decompose complex requests into specialized subtasks and
-delegate those subtasks to dedicated agents under the supervision of a
-central Supervisor Agent.
-
-The Supervisor:
-
-1. Understands the user's request
-2. Decomposes the task into subtasks
-3. Assigns each subtask to the appropriate specialist agent
-4. Collects the resulting observations
-5. Synthesizes the specialist findings
-6. Produces the final response
-
-Currently, Nova AI can coordinate specialized agents such as:
-
-- 🔬 ResearchAgent — handles information retrieval and external research
-- 📊 DataAnalystAgent — handles calculations and data analysis
-
-#### Example - Multi-Agent Collaboration
-
-```text
-You:
-Fetch the current temperatures of Tokyo and Paris, calculate their
-temperature difference using Python, and tell me which city is warmer.
-
-Nova AI:
-
-📋 Supervisor Formulated Multi-Agent Plan
-
-1. 🌐 ResearchAgent
-   Fetch the current temperature of Tokyo and Paris.
-
-2. 📊 DataAnalystAgent
-   Calculate the temperature difference and determine which city is warmer.
-
-🚀 Dispatching Subtask #1 → ResearchAgent
-🛠️ get_weather
-
-🧠 ResearchAgent:
-Tokyo is +28°C (Sunny); Paris is +20°C (Overcast).
-
-🚀 Dispatching Subtask #2 → DataAnalystAgent
-🛠️ run_python_code
-
-🧠 DataAnalystAgent:
-The temperature difference is 8°C. Tokyo is warmer.
-
-🧠 Supervisor:
-Synthesizing all specialist findings...
-
-🤖 Final Answer:
-The current temperature in Tokyo is +28°C, while Paris is +20°C.
-The difference is 8°C, making Tokyo warmer.
-```
-
----
-
-## 🚀 Development Roadmap
-
-### ✅ Phase 1: Foundation & Tools (Complete)
-
-- [x] Weather Tool (wttr.in)
-- [x] Python Code Execution Engine (Docker Sandbox)
-- [x] Web Search Tool (Tavily API)
-- [x] Tool Calling
-- [x] Pydantic Input Validation
-- [x] Structured Logging
-
-Nova AI can reason about user requests, choose the appropriate tool, execute it, observe the results, and synthesize a final response.
-
----
-
-### ✅ Phase 2: Memory, Data Ingestion & Retrieval (Complete)
-
-- [x] SQLite Persistent Memory
-- [x] Shared File Workspace & Data Analysis
-- [x] PDF Parsing & Content Inspection
-- [x] Local RAG Engine
-- [x] Workspace Auto-Ingestion
-- [x] Smart Python Execution Output Capping
-- [x] Hybrid Search (Dense + BM25)
-- [x] Reciprocal Rank Fusion (RRF)
-- [x] HyDE Retrieval Enhancement
-
-Nova AI now provides a complete local knowledge and data layer with
-persistent memory, automated workspace ingestion, PDF processing, data
-analysis, and advanced Retrieval-Augmented Generation. Its hybrid retrieval
-pipeline combines dense semantic search, BM25, Reciprocal Rank Fusion (RRF),
-and HyDE to improve the relevance of retrieved context.
-
-Phase 2 delivers a complete local knowledge and data layer for Nova AI,
-combining persistent memory, automated workspace ingestion, safe code
-execution, document processing, hybrid retrieval, and local knowledge
-grounding.
-
----
-
-### ✅ Phase 3: Autonomous Intelligence (Complete)
-
-#### Agent Reasoning
-
-- [x] ReAct Planning & Reflection Loop
-- [x] Automated Evaluation Test Suite
-- [x] Human-in-the-Loop Safeguards
-
-#### Advanced Capabilities
-
-- [x] Vision / Image Understanding
-- [x] Multi-Agent Collaboration Protocol
-
-Phase 3 establishes Nova AI's autonomous reasoning layer, combining
-multi-step planning, reflection, automated evaluation, human-in-the-loop
-safeguards, multimodal understanding, and specialized multi-agent
-collaboration.
-
-Nova AI has completed its initial autonomous-agent architecture, including reasoning, evaluation, safety, multimodal understanding, and multi-agent collaboration.
-
----
-
-## 🎯 Project Vision
-
-Nova AI can reason, plan, delegate, execute, observe, evaluate, and synthesize.
-
-Rather than relying heavily on agent frameworks, Nova AI implements reasoning, tool calling, code execution, memory, data ingestion, retrieval, and autonomous planning step by step to understand how modern AI agents actually work.
-
-Nova AI is evolving toward an AI system capable of:
-
-- Remembering previous conversations
-- Working with user-provided files
-- Parsing and understanding documents
-- Understanding images and multimodal inputs
-- Retrieving knowledge from indexed documents
-- Executing code safely
-- Performing complex mathematical and scientific computations
-- Analyzing datasets and generating visualizations
-- Retrieving knowledge from local vector databases and online sources
-- Planning complex multi-step tasks
-- Reflecting on intermediate results
-- Delegating tasks to specialized agents
-- Synthesizing results from multiple agents
-- Continuously improving through evaluation
+## 🛡️ Reliability & Safety Matrix
+
+- **Path Traversal Guardrails**: Sandboxed workspace utilities enforce strict path resolution inside `nova_workspace/`.
+- **Container Isolation**: Code runs exclusively in ephemeral, non-root Docker sandboxes.
+- **Output Truncation**: Stdout and DataFrame representations are automatically capped before model ingestion.
+- **Deterministic Fail-Safes**: All pending HITL requests automatically default to denial upon timeout.
 
 ---
 
