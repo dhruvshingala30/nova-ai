@@ -4,6 +4,10 @@ import { useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
+// Dynamic API Base URL resolution:
+// Uses NEXT_PUBLIC_API_URL on Vercel deployment, falling back to localhost for local dev.
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+
 type NovaEvent = {
   event_type: string;
   content: string;
@@ -211,7 +215,7 @@ function getProcessingStatus(events: NovaEvent[]) {
       text: "Nova is starting...",
     };
   }
-  
+
   switch (lastEvent.event_type) {
     case "session_updated":
       return {
@@ -381,7 +385,7 @@ export default function Home() {
   const [isRunning, setIsRunning] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
-  
+
   const [pendingApproval, setPendingApproval] = useState<{
     turnId: string;
     sessionId: string;
@@ -389,12 +393,12 @@ export default function Home() {
     tool: string;
     code?: string;
   } | null>(null);
-    
+
   const [isSubmittingApproval, setIsSubmittingApproval] = useState(false);
-  
+
   const loadSessions = async () => {
     try {
-      const response = await fetch("http://127.0.0.1:8000/api/conversations");
+      const response = await fetch(`${API_BASE_URL}/api/conversations`);
 
       if (!response.ok) {
         throw new Error(`Failed to load conversations: ${response.status}`);
@@ -407,7 +411,7 @@ export default function Home() {
       console.error("Failed to load conversations:", error);
     }
   };
-    
+
   const handleNewChat = () => {
     if (isRunning) return;
 
@@ -417,11 +421,11 @@ export default function Home() {
     setPendingApproval(null);
     setIsSubmittingApproval(false);
   };
-    
+
   useEffect(() => {
     loadSessions();
   }, []);
-    
+
   const submitApproval = async (approved: boolean) => {
     if (!pendingApproval || isSubmittingApproval) return;
 
@@ -429,7 +433,7 @@ export default function Home() {
 
     try {
       const response = await fetch(
-        `http://127.0.0.1:8000/api/chat/${pendingApproval.sessionId}/approval?approved=${approved}`,
+        `${API_BASE_URL}/api/chat/${pendingApproval.sessionId}/approval?approved=${approved}`,
         {
           method: "POST",
         },
@@ -450,7 +454,7 @@ export default function Home() {
       setIsSubmittingApproval(false);
     }
   };
-    
+
   const loadConversation = async (selectedSessionId: string) => {
     if (isRunning) return;
 
@@ -460,7 +464,7 @@ export default function Home() {
       setMessage("");
 
       const response = await fetch(
-        `http://127.0.0.1:8000/api/conversations/${selectedSessionId}`,
+        `${API_BASE_URL}/api/conversations/${selectedSessionId}`,
       );
 
       if (!response.ok) {
@@ -529,7 +533,7 @@ export default function Home() {
 
     try {
       // Start Nova
-      const response = await fetch("http://127.0.0.1:8000/api/chat", {
+      const response = await fetch(`${API_BASE_URL}/api/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -558,7 +562,7 @@ export default function Home() {
 
       // Connect to Nova's SSE stream
       const eventSource = new EventSource(
-        `http://127.0.0.1:8000/api/chat/${data.session_id}/events`,
+        `${API_BASE_URL}/api/chat/${data.session_id}/events`,
       );
 
       const novaEvents = [
@@ -1054,7 +1058,7 @@ export default function Home() {
                     {/* Agent Thinking Indicator */}
                     {turn.id === chatTurns[chatTurns.length - 1]?.id &&
                       isRunning &&
-                      !turn.assistantMessage && // <--- Hides spinner as soon as the first chunk renders
+                      !turn.assistantMessage &&
                       (() => {
                         const status = getProcessingStatus(turn.events);
                         return (
