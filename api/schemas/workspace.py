@@ -8,7 +8,7 @@ from pydantic import BaseModel
 class WorkspaceFileInfo(BaseModel):
     name: str
     size_bytes: int
-    is_image: bool = False
+    is_image: bool
     is_template: bool
 
 
