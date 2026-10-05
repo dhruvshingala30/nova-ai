@@ -21,3 +21,4 @@ fastapi
 uvicorn[standard]
 openai
 e2b-code-interpreter
+python-multipart
