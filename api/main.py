@@ -13,6 +13,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 from api.routes.chat import router as chat_router
 from api.routes.conversations import router as conversations_router
+from api.routes.workspace import router as workspace_router
 
 # Initialize the main FastAPI application instance
 app = FastAPI(
@@ -56,5 +57,10 @@ app.include_router(
 
 app.include_router(
     router=conversations_router,
+    prefix="/api",
+)
+
+app.include_router(
+    router=workspace_router,
     prefix="/api",
 )

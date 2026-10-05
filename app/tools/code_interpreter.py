@@ -1,27 +1,13 @@
 """
-app/tools/code_interpreter.py - Hybrid Python Execution Sandbox Engine.
-
-Dual-mode execution engine for NovaAI:
-1. Docker Mode (Primary): Executes code inside a restricted, isolated Docker container.
-2. Local Mode (Fallback): Executes code locally if Docker Desktop is closed or missing.
+app/tools/code_interpreter.py - Dual-Mode Execution Sandbox with Session Isolation.
 """
 
-# import contextlib
-# import io
-# import math
 import base64
-import os
-
-# import traceback
 from pathlib import Path
 
 import docker
 from docker.errors import ContainerError, DockerException
 
-# ------------------------------------------------------------------
-# Self-healing import path setup: Ensures Python can find 'app.core'
-# regardless of where or how this script is executed from terminal.
-# ------------------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 from app.config import E2B_API_KEY, USE_CLOUD_LLM
@@ -30,85 +16,88 @@ from app.models import CodeInterpreterInput
 
 
 class CodeInterpreter:
-    """Sandbox execution wrapper with Docker support and local fallback."""
-
-    # --------------------------------------------------------------
-    # MODE 1: Main Execution Router (Docker -> Local Fallback)
-    # --------------------------------------------------------------
     @staticmethod
     def run_python_code(
         params: CodeInterpreterInput | None = None,
         code: str | None = None,
+        session_id: str | None = None,
     ):
-        """Runs Python code using Docker if running, otherwise falls back to local execution."""
-        # Convert raw keyword arg 'code' into CodeInterpreterInput if passed directly by agent.py
         if params is None:
             if code is None:
                 return {
                     "success": False,
                     "output": None,
-                    "error": "No Python code provided to execute.",
+                    "error": "No Python code provided.",
                 }
             params = CodeInterpreterInput(code=code)
 
-        # ----------------------------------------------------------
-        # PREAMBLE WRAPPER:
-        # Automatically imports common libraries so NovaAI doesn't
-        # have to write boilerplate import statements every turn.
-        # ----------------------------------------------------------
+        target_dir = workspace.get_workspace_dir(session_id=session_id)
+        default_dir = workspace.get_workspace_dir(session_id=None)
+
         wrapped_code = (
             "import math, sys\n"
             "import numpy as np\n"
             "import pandas as pd\n"
-            "# Set Pandas display limits to prevent context overflow\n"
             "pd.set_option('display.max_rows', 20)\n"
             "pd.set_option('display.max_columns', 8)\n"
             "pd.set_option('display.width', 120)\n"
             "import matplotlib\n"
-            "matplotlib.use('Agg')\n"  # Headless backend: stops popup GUI windows from crashing headless containers
+            "matplotlib.use('Agg')\n"
             "import matplotlib.pyplot as plt\n"
             "try:\n"
             "    import sympy as sp\n"
-            "    from sympy import Symbol, symbols, Eq, solve, diff, integrate, Matrix, sqrt, sin, cos, tan, log, exp, pi, oo\n"
             "except ImportError:\n"
             "    pass\n\n"
-            "# --- LLM Generated Code Execution ---\n"
             f"{params.code}\n\n"
-            "# Auto-print result variable if defined\n"
             "if 'result' in locals() and result is not None:\n"
             "    print(result)\n"
         )
 
+        # -------------------------------------------------------------
+        # CLOUD MODE: E2B Sandbox
+        # -------------------------------------------------------------
         if USE_CLOUD_LLM and E2B_API_KEY:
             from e2b_code_interpreter import Sandbox
 
             try:
                 with Sandbox.create(api_key=E2B_API_KEY) as sandbox:
-                    # 1. Sync workspace files using the singleton workspace_dir
-                    existing_files = {
-                        f.name for f in workspace.workspace_dir.glob("*") if f.is_file()
-                    }
-                    for file_path in workspace.workspace_dir.glob("*"):
-                        if file_path.is_file():
-                            sandbox.files.write(file_path.name, file_path.read_bytes())
+                    existing_files = set()
+
+                    # Sync baseline workspace files
+                    if default_dir.exists():
+                        for f in default_dir.glob("*"):
+                            if f.is_file():
+                                sandbox.files.write(f.name, f.read_bytes())
+                                existing_files.add(f.name)
+
+                    # Sync session-specific uploads
+                    if target_dir.exists():
+                        for f in target_dir.glob("*"):
+                            if f.is_file():
+                                sandbox.files.write(f.name, f.read_bytes())
+                                existing_files.add(f.name)
 
                     execution = sandbox.run_code(code=wrapped_code, language="python")
-                    output_text = "\n".join([str(l) for l in execution.logs.stdout])
+                    output_text = "\n".join(
+                        [str(line) for line in execution.logs.stdout]
+                    )
                     error_text = (
-                        "\n".join([str(e) for e in execution.logs.stderr])
+                        "\n".join([str(err) for err in execution.logs.stderr])
                         if execution.error
                         else None
                     )
 
                     artifacts = []
 
-                    # 1. Download newly generated image files created by code (e.g., plt.savefig)
+                    # Download saved artifacts back into session directory
                     try:
                         sandbox_files = sandbox.files.list(".")
                         for s_file in sandbox_files:
                             name = s_file.name
                             if (
-                                name.lower().endswith((".png", ".jpg", ".jpeg"))
+                                name.lower().endswith(
+                                    (".png", ".jpg", ".jpeg", ".csv", ".json")
+                                )
                                 and name not in existing_files
                             ):
                                 content = sandbox.files.read(name)
@@ -117,24 +106,26 @@ class CodeInterpreter:
                                     if isinstance(content, str)
                                     else bytes(content)
                                 )
-                                safe_path = workspace.resolve_safe_path(name)
-                                safe_path.write_bytes(file_bytes)
+                                out_path = workspace.resolve_safe_path(
+                                    name, session_id=session_id
+                                )
+                                out_path.write_bytes(file_bytes)
                                 if name not in artifacts:
                                     artifacts.append(name)
                     except Exception:  # noqa: BLE001, S110
                         pass
 
-                    # 2. Fallback: If code plotted via display/show without savefig, capture res.png
+                    # Capture plots emitted without an explicit savefig call
                     if not artifacts:
                         for idx, res in enumerate(execution.results):
                             if res.png:
                                 chart_name = (
                                     "chart.png" if idx == 0 else f"chart_{idx + 1}.png"
                                 )
-                                safe_chart_path = workspace.resolve_safe_path(
-                                    chart_name
+                                out_path = workspace.resolve_safe_path(
+                                    chart_name, session_id=session_id
                                 )
-                                safe_chart_path.write_bytes(base64.b64decode(res.png))
+                                out_path.write_bytes(base64.b64decode(res.png))
                                 artifacts.append(chart_name)
 
                     return {
@@ -154,57 +145,44 @@ class CodeInterpreter:
                     "artifacts": [],
                 }
 
+        # -------------------------------------------------------------
+        # LOCAL MODE: Docker Container
+        # -------------------------------------------------------------
         else:
             try:
                 client = docker.from_env()
-
-                # Check if Docker Desktop / Daemon is actually active and responsive
                 client.ping()
 
-                # Dynamic path resolution for Docker-out-of-Docker
-                host_project_env = os.getenv("HOST_PROJECT_PATH")
-                if host_project_env:
-                    host_workspace_path = str(Path(host_project_env) / "nova_workspace")
-                else:
-                    host_workspace_path = str(workspace.workspace_dir.resolve())
-
-                # Launch ephemeral sandbox container
                 output_bytes = client.containers.run(
                     image="nova-sandbox:latest",
                     command=["python", "-c", wrapped_code],
                     volumes={
-                        host_workspace_path: {
-                            "bind": "/workspace",  # Mount host ./nova_workspace to /workspace
-                            "mode": "rw",  # Read-Write permissions
-                        }
+                        str(target_dir.resolve()): {"bind": "/workspace", "mode": "rw"}
                     },
-                    working_dir="/workspace",  # Run directly inside mounted directory
+                    working_dir="/workspace",
                     detach=False,
-                    remove=True,  # Self-destruct container after execution finishes
-                    network_disabled=True,  # SECURITY: Cut off internet access inside sandbox
-                    mem_limit="512m",  # SECURITY: Cap RAM usage to prevent system freeze
-                    cpu_quota=50000,  # SECURITY: Restrict CPU quota (~50% of 1 core)
+                    remove=True,
+                    network_disabled=True,
+                    mem_limit="512m",
+                    cpu_quota=50000,
                 )
 
                 execution_output = output_bytes.decode("utf-8").strip()
-
-                # --- APPLY OUTPUT CAPPING ---
-                MAX_CHARS = 4000
-                if len(execution_output) > MAX_CHARS:
+                if len(execution_output) > 4000:
                     execution_output = (
-                        execution_output[:MAX_CHARS]
-                        + f"\n\n... [Output truncated. Total characters exceeded {MAX_CHARS}]"
+                        execution_output[:4000] + "\n\n... [Output truncated]"
                     )
 
                 return {
                     "success": True,
                     "output": execution_output
-                    if execution_output
-                    else "Code executed successfully with no printed output.",
+                    or "Code executed successfully with no printed output.",
                     "error": None,
                 }
             except ContainerError as ce:
-                stderr_msg = ce.stderr.decode("utf-8") if ce.stderr else str(ce)  # type: ignore
+                stderr_msg = (
+                    ce.stderr.decode("utf-8") if isinstance(ce.stderr, bytes) else str(ce)
+                )
                 return {
                     "success": False,
                     "output": None,
@@ -214,109 +192,11 @@ class CodeInterpreter:
                 return {
                     "success": False,
                     "output": None,
-                    "error": f"Docker Engine Error. Ensure Docker Desktop is running: {str(de)}",  # noqa: RUF010
+                    "error": f"Docker Engine Error: {str(de)}",  # noqa: RUF010
                 }
             except Exception as e:  # noqa: BLE001
                 return {
                     "success": False,
                     "output": None,
-                    "error": f"Unexpected CodeInterpreter Error: {str(e)}",  # noqa: RUF010
+                    "error": f"Unexpected Error: {str(e)}",  # noqa: RUF010
                 }
-        # ----------------------------------------------------------
-        # Safety Return if Docker SDK is not installed on host
-        # ----------------------------------------------------------
-        return {
-            "success": False,
-            "output": None,
-            "error": "Docker SDK is not installed or unavailable on this system.",
-        }
-
-    # # --------------------------------------------------------------
-    # # MODE 2: Local Fallback Execution Engine
-    # # Used when Docker is turned off or unavailable on host.
-    # # --------------------------------------------------------------
-    # @staticmethod
-    # def _run_local(code: str) -> dict:
-    #     """Fallback local execution engine when Docker is unavailable."""
-
-    #     # Memory buffer to catch anything printed via `print(...)`
-    #     stdout_buffer = io.StringIO()
-
-    #     # Build a safe global namespace pre-populated with data science & math tools
-    #     safe_globals = {
-    #         "__builtins__": __builtins__,
-    #         "math": math,
-    #         "numpy": sys.modules.get("numpy"),
-    #         "np": sys.modules.get("numpy"),
-    #         "pandas": sys.modules.get("pandas"),
-    #         "pd": sys.modules.get("pandas"),
-    #         "plt": sys.modules.get("matplotlib.pyplot"),
-    #     }
-
-    #     # Safely attempt pre-loading SymPy for symbolic algebra/calculus
-    #     try:
-    #         import sympy as sp
-
-    #         safe_globals["sympy"] = sp
-    #         safe_globals["sp"] = sp
-    #         safe_globals["Symbol"] = sp.Symbol
-    #         safe_globals["symbols"] = sp.symbols
-    #         safe_globals["Eq"] = sp.Eq
-    #         safe_globals["solve"] = sp.solve
-    #         safe_globals["diff"] = sp.diff
-    #         safe_globals["integrate"] = sp.integrate
-    #         safe_globals["Matrix"] = sp.Matrix
-    #         safe_globals["sqrt"] = sp.sqrt
-    #     except ImportError:
-    #         # Fall back to standard math.sqrt if SymPy isn't installed locally
-    #         safe_globals["sqrt"] = math.sqrt
-
-    #     safe_locals = {}
-
-    #     try:
-    #         # --- DIRECTORY SWAP TRICK ---
-    #         # Jump into ./nova_workspace so LLM scripts reading/writing relative
-    #         # paths (like 'sales.csv') hit the right directory automatically.
-    #         original_dir = Path.cwd()
-    #         import os
-
-    #         os.chdir(workspace.workspace_dir)
-
-    #         try:
-    #             # Capture standard output stream while code executes
-    #             with contextlib.redirect_stdout(stdout_buffer):
-    #                 exec(code, safe_globals, safe_locals)
-    #         finally:
-    #             # CRITICAL: Always jump back to original project root after execution!
-    #             os.chdir(original_dir)
-
-    #         # Retrieve printed text and check for auto-assigned `result` variable
-    #         output = stdout_buffer.getvalue().strip()
-    #         result_val = safe_locals.get("result", None)
-
-    #         # If nothing was printed, auto-print `result` variable if present
-    #         if not output and result_val is not None:
-    #             output = str(result_val)
-
-    #         return {
-    #             "success": True,
-    #             "output": output
-    #             if output
-    #             else "Code executed successfully with no printed output.",
-    #             "error": None,
-    #         }
-    #     except Exception as e:
-    #         # Catch runtime errors and format traceback nicely for LLM self-correction
-    #         error_msg = traceback.format_exc()
-    #         return {
-    #             "success": False,
-    #             "output": None,
-    #             "error": f"Local Execution Error: {str(e)}\n\n{error_msg}",
-    #         }
-
-
-        # ----------------------------------------------------------
-        # STEP 2: Graceful Local Fallback
-        # Triggers seamlessly if Docker isn't running.
-        # ----------------------------------------------------------
-        # return CodeInterpreter._run_local(wrapped_code)

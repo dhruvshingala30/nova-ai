@@ -26,6 +26,7 @@ from app.config import (
     OLLAMA_HOST,
     USE_CLOUD_LLM,
     VISION_MODEL_NAME,
+    WORKSPACE_DIR,
 )
 from app.core.workspace_manager import workspace
 from app.models import (
@@ -58,7 +59,7 @@ def list_workspace_files(
         for path in target_dir.glob(params.pattern): # type: ignore
             if path.is_file():
                 # Compute relative path back to root workspace for clean LLM context
-                rel_path = path.relative_to(workspace.workspace_dir)
+                rel_path = path.relative_to(WORKSPACE_DIR)
                 files_info.append({
                     "name": path.name,
                     "path": str(rel_path),
@@ -227,17 +228,20 @@ def inspect_image(
     params: InspectImageInput | None = None,
     file_path: str = "",
     prompt: str = "Describe this image in detail.",
+    session_id: str | None = None,
 ) -> dict[str, str]:
-    """Inspects an image located in ./nova_workspace using a multimodal vision model.
-
-    Supports both Cloud (Groq Vision) and Local (Ollama LLaVA) execution.
-    """
     if params is None:
         params = InspectImageInput(file_path=file_path, prompt=prompt)
 
     try:
-        # 1. Path Sandboxing Guardrail
-        safe_file_path = workspace.resolve_safe_path(params.file_path)
+        # Check session directory first, then default directory
+        safe_file_path = workspace.resolve_safe_path(
+            params.file_path, session_id=session_id
+        )
+        if not safe_file_path.exists():
+            safe_file_path = workspace.resolve_safe_path(
+                params.file_path, session_id=None
+            )
 
         if not safe_file_path.exists():
             return {
@@ -245,30 +249,23 @@ def inspect_image(
                 "message": f"File '{params.file_path}' does not exist.",
             }
 
-        # 2. File Format Guardrail
         supported_exts = {".png", ".jpg", ".jpeg", ".webp"}
         if safe_file_path.suffix.lower() not in supported_exts:
             return {
                 "status": "error",
-                "message": f"File '{params.file_path}' is not a supported image format ({supported_exts})",
+                "message": f"File '{params.file_path}' is not a supported image format.",
             }
 
-        # 3. Encode Image to Base64
         with open(safe_file_path, "rb") as img_file:
-            base64_image = base64.b64encode(img_file.read()).decode("utf-8")
+            base64_image = base64.b64encode(img_file.read()).decode("utf-8").strip()
 
-        # 4. Hybrid Routing: Cloud (Groq) vs Local (Ollama)
         if USE_CLOUD_LLM:
             from openai import OpenAI
 
             ext = safe_file_path.suffix.lower().lstrip(".")
             mime_type = "image/jpeg" if ext in ["jpg", "jpeg"] else f"image/{ext}"
 
-            cloud_client = OpenAI(
-                api_key=GROQ_API_KEY,
-                base_url=CLOUD_BASE_URL,
-            )
-
+            cloud_client = OpenAI(api_key=GROQ_API_KEY, base_url=CLOUD_BASE_URL)
             response = cloud_client.chat.completions.create(
                 model=CLOUD_VISION_MODEL,
                 messages=[
@@ -288,22 +285,16 @@ def inspect_image(
                 max_tokens=600,
                 temperature=0.1,
             )
-
             visual_analysis = (
                 response.choices[0].message.content
                 or "No visual description generated."
             )
-
         else:
             client = Client(host=OLLAMA_HOST)
             response = client.chat(
                 model=VISION_MODEL_NAME,
                 messages=[
-                    {
-                        "role": "user",
-                        "content": params.prompt,
-                        "images": [base64_image],
-                    }
+                    {"role": "user", "content": params.prompt, "images": [base64_image]}
                 ],
                 options={"temperature": 0.1},
                 keep_alive="5m",
@@ -318,17 +309,13 @@ def inspect_image(
             "prompt_asked": params.prompt,
             "visual_analysis": visual_analysis,
         }
-
     except Exception as e:  # noqa: BLE001
-        return {
-            "status": "error",
-            "message": f"Failed to inspect image: {str(e)}",  # noqa: RUF010
-        }
+        return {"status": "error", "message": f"Failed to inspect image: {str(e)}"}  # noqa: RUF010
 
 
 if __name__ == "__main__":
     # 1. Create a dummy test file in workspace
-    dummy_csv = workspace.workspace_dir / "users.csv"
+    dummy_csv = WORKSPACE_DIR / "users.csv"
     dummy_csv.write_text(
         "id,name,role\n1,Alice,Admin\n2,Bob,Developer\n3,Charlie,Data Scientist"
     )

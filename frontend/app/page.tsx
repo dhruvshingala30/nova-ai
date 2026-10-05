@@ -504,6 +504,72 @@ export default function Home() {
     }
   };
 
+  type WorkspaceFile = {
+    name: string;
+    size_bytes: number;
+    is_image: boolean;
+    is_template?: boolean;
+  };
+
+  const [workspaceFiles, setWorkspaceFiles] = useState<WorkspaceFile[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isDragOver, setIsDragOver] = useState(false);
+
+  const loadWorkspaceFiles = async (activeId: string | null) => {
+    if (!activeId) return;
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/workspace/${activeId}/files`,
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setWorkspaceFiles(data.files || []);
+      }
+    } catch (err) {
+      console.error("Failed to load workspace files:", err);
+    }
+  };
+
+  useEffect(() => {
+    if (sessionId) {
+      loadWorkspaceFiles(sessionId);
+    }
+  }, [sessionId]);
+
+  const uploadWorkspaceFile = async (file: File) => {
+    const activeId = sessionId || crypto.randomUUID();
+    if (!sessionId) setSessionId(activeId);
+
+    const formData = new FormData();
+    formData.append("file", file);
+
+    setIsUploading(true);
+    try {
+      const res = await fetch(
+        `${API_BASE_URL}/api/workspace/${activeId}/upload`,
+        {
+          method: "POST",
+          body: formData,
+        },
+      );
+      if (res.ok) {
+        await loadWorkspaceFiles(activeId);
+      }
+    } catch (err) {
+      console.error("Upload error:", err);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+      await uploadWorkspaceFile(e.dataTransfer.files[0]);
+    }
+  };
+    
   const sendMessage = async () => {
     if (!message.trim() || isRunning) return;
 
@@ -760,6 +826,75 @@ export default function Home() {
                 {session.title}
               </button>
             ))}
+          </div>
+        </div>
+
+        {/* WORKSPACE & DRAG-AND-DROP PANEL */}
+        <div className="border-t px-3 py-3">
+          <div className="flex items-center justify-between mb-2">
+            <p className="px-2 text-xs font-semibold uppercase tracking-wider text-gray-400">
+              Workspace Files
+            </p>
+            <label className="cursor-pointer text-xs font-medium text-blue-600 hover:text-blue-800">
+              {isUploading ? "Uploading..." : "+ Upload"}
+              <input
+                type="file"
+                className="hidden"
+                onChange={(e) =>
+                  e.target.files?.[0] && uploadWorkspaceFile(e.target.files[0])
+                }
+              />
+            </label>
+          </div>
+
+          {/* Drop Zone */}
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              setIsDragOver(true);
+            }}
+            onDragLeave={() => setIsDragOver(false)}
+            onDrop={handleDrop}
+            className={`rounded-lg border-2 border-dashed p-3 text-center transition ${
+              isDragOver
+                ? "border-blue-500 bg-blue-50/50"
+                : "border-gray-200 hover:bg-gray-100/50"
+            }`}
+          >
+            <p className="text-[11px] text-gray-500">
+              Drag & drop files (CSV, PDF, TXT)
+            </p>
+          </div>
+
+          {/* File List */}
+          <div className="mt-2 max-h-40 space-y-1 overflow-y-auto">
+            {workspaceFiles.length === 0 ? (
+              <p className="px-2 text-[11px] text-gray-400 italic">
+                No files in session
+              </p>
+            ) : (
+              workspaceFiles.map((file) => (
+                <a
+                  key={file.name}
+                  href={`${API_BASE_URL}/api/workspace/${sessionId || "default"}/files/${file.name}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-between rounded-md px-2 py-1 text-xs text-gray-700 hover:bg-gray-200/60"
+                >
+                  <span className="truncate">
+                    {file.is_image
+                      ? "🖼️ "
+                      : file.name.endsWith(".pdf")
+                        ? "📄 "
+                        : "📊 "}
+                    {file.name}
+                  </span>
+                  <span className="text-[10px] text-gray-400 shrink-0 ml-1">
+                    {(file.size_bytes / 1024).toFixed(0)} KB
+                  </span>
+                </a>
+              ))
+            )}
           </div>
         </div>
 

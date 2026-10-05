@@ -141,7 +141,7 @@ class BaseSpecialistAgent:
 
 
     def execute_tool(
-        self, tool_name: str, tool_input: dict[str, Any]
+        self, tool_name: str, tool_input: dict[str, Any], session_id: str | None = None,
     ) -> dict[str, Any]:
         """Validates and runs an assigned tool from the scoped inventory."""
         tool = self.scoped_tools.get(tool_name)
@@ -164,6 +164,13 @@ class BaseSpecialistAgent:
 
         # Invoke the underlying python tool function
         handler = tool["function"]
+
+        import inspect
+
+        sig = inspect.signature(handler)
+        if "session_id" in sig.parameters:
+            tool_input["session_id"] = session_id
+
         return handler(**tool_input)
 
     def work_on_task(
