@@ -19,3 +19,5 @@ watchdog
 rank-bm25
 fastapi
 uvicorn[standard]
+openai
+e2b-code-interpreter

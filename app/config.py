@@ -6,22 +6,46 @@ UI icons, and chat memory limits for the NovaAI Agent.
 """
 
 import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# Mode switch
+USE_CLOUD_LLM = os.getenv(key="USER_CLOUD_LLM", default="false").lower() == "true"
 
 # -------------------------------
-# LLM & Host Configuration
+# Cloud inference (Groq / OpenRouter)
 # -------------------------------
-# Host address for the local Ollama instance
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+GROQ_API_KEY = os.getenv(key="GROQ_API_KEY", default="")
+CLOUD_MODEL_NAME = os.getenv(key="CLOUD_MODEL_NAME", default="llama-3.3-70b-versatile")
+CLOUD_BASE_URL = os.getenv(key="CLOUD_BASE_URL", default="https://api.groq.com/openai/v1")
+CLOUD_VISION_MODEL = os.getenv(key="CLOUD_VISION_MODEL", default="llama-3.2-11b-vision-preview")
 
-# Local LLM model identifier used for agent reasoning
-MODEL_NAME = os.getenv("MODEL_NAME", "qwen2.5:7b-instruct-q8_0")
-VISION_MODEL_NAME = os.getenv("VISION_MODEL_NAME", "llava")
+# -------------------------------
+# Local Ollama fallback
+# -------------------------------
+OLLAMA_HOST = os.getenv(key="OLLAMA_HOST", default="http://localhost:11434")
+MODEL_NAME = os.getenv(key="MODEL_NAME", default="qwen2.5:7b-instruct-q8_0")
+VISION_MODEL_NAME = os.getenv(key="VISION_MODEL_NAME", default="llava")
+
+# Sandbox
+E2B_API_KEY = os.getenv(key="E2B_API_KEY", default="")
+
+# Workspace & Database
+WORKSPACE_DIR = Path(os.getenv(key="WORKSPACE_DIR", default=str(PROJECT_ROOT / "nova_workspace")))
+WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
+DATABASE_PATH = Path(os.getenv(key="DATABASE_PATH", default=str(PROJECT_ROOT / "data" / "nova.db")))
+DATABASE_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 # -------------------------------
 # Agent Chat Memory Configuration
 # -------------------------------
 # Maximum number of past conversation messages retained in active LLM context
-MAX_HISTORY = 20
+MAX_HISTORY = int(os.getenv(key="MAX_HISTORY", default="20"))
 
 # Request timeout limit (in seconds) for external HTTP requests
 TIME_OUT = 10

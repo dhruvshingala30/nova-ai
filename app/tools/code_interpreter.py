@@ -9,6 +9,7 @@ Dual-mode execution engine for NovaAI:
 # import contextlib
 # import io
 # import math
+import base64
 import os
 
 # import traceback
@@ -23,19 +24,10 @@ from docker.errors import ContainerError, DockerException
 # ------------------------------------------------------------------
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
+from app.config import E2B_API_KEY, USE_CLOUD_LLM
 from app.core.workspace_manager import workspace
 from app.models import CodeInterpreterInput
 
-# ------------------------------------------------------------------
-# Soft Docker Check: Prevents app crash if the `docker` python SDK
-# isn't installed on the developer's machine.
-# ------------------------------------------------------------------
-try:
-    import docker
-
-    DOCKER_AVAILABLE = True
-except ImportError:
-    DOCKER_AVAILABLE = False
 
 class CodeInterpreter:
     """Sandbox execution wrapper with Docker support and local fallback."""
@@ -87,10 +79,82 @@ class CodeInterpreter:
             "    print(result)\n"
         )
 
-        # ----------------------------------------------------------
-        # STEP 1: Attempt Isolated Docker Execution
-        # ----------------------------------------------------------
-        if DOCKER_AVAILABLE:
+        if USE_CLOUD_LLM and E2B_API_KEY:
+            from e2b_code_interpreter import Sandbox
+
+            try:
+                with Sandbox.create(api_key=E2B_API_KEY) as sandbox:
+                    # 1. Sync workspace files using the singleton workspace_dir
+                    existing_files = {
+                        f.name for f in workspace.workspace_dir.glob("*") if f.is_file()
+                    }
+                    for file_path in workspace.workspace_dir.glob("*"):
+                        if file_path.is_file():
+                            sandbox.files.write(file_path.name, file_path.read_bytes())
+
+                    execution = sandbox.run_code(code=wrapped_code, language="python")
+                    output_text = "\n".join([str(l) for l in execution.logs.stdout])
+                    error_text = (
+                        "\n".join([str(e) for e in execution.logs.stderr])
+                        if execution.error
+                        else None
+                    )
+
+                    artifacts = []
+
+                    # 1. Download newly generated image files created by code (e.g., plt.savefig)
+                    try:
+                        sandbox_files = sandbox.files.list(".")
+                        for s_file in sandbox_files:
+                            name = s_file.name
+                            if (
+                                name.lower().endswith((".png", ".jpg", ".jpeg"))
+                                and name not in existing_files
+                            ):
+                                content = sandbox.files.read(name)
+                                file_bytes = (
+                                    content.encode("utf-8")
+                                    if isinstance(content, str)
+                                    else bytes(content)
+                                )
+                                safe_path = workspace.resolve_safe_path(name)
+                                safe_path.write_bytes(file_bytes)
+                                if name not in artifacts:
+                                    artifacts.append(name)
+                    except Exception:  # noqa: BLE001, S110
+                        pass
+
+                    # 2. Fallback: If code plotted via display/show without savefig, capture res.png
+                    if not artifacts:
+                        for idx, res in enumerate(execution.results):
+                            if res.png:
+                                chart_name = (
+                                    "chart.png" if idx == 0 else f"chart_{idx + 1}.png"
+                                )
+                                safe_chart_path = workspace.resolve_safe_path(
+                                    chart_name
+                                )
+                                safe_chart_path.write_bytes(base64.b64decode(res.png))
+                                artifacts.append(chart_name)
+
+                    return {
+                        "success": execution.error is None,
+                        "output": output_text
+                        or "Code executed successfully with no printed output.",
+                        "error": str(execution.error)
+                        if execution.error
+                        else error_text,
+                        "artifacts": artifacts,
+                    }
+            except Exception as e:  # noqa: BLE001
+                return {
+                    "success": False,
+                    "output": None,
+                    "error": str(e),
+                    "artifacts": [],
+                }
+
+        else:
             try:
                 client = docker.from_env()
 

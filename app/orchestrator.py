@@ -14,12 +14,18 @@ from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
-from ollama import Client
-
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 from app.agents.specialists import DataAnalystAgent, DocVisionAgent, ResearchAgent
-from app.config import MAX_HISTORY, MODEL_NAME, OLLAMA_HOST
+from app.config import (
+    CLOUD_BASE_URL,
+    CLOUD_MODEL_NAME,
+    GROQ_API_KEY,
+    MAX_HISTORY,
+    MODEL_NAME,
+    OLLAMA_HOST,
+    USE_CLOUD_LLM,
+)
 from app.core.event import NovaEvent
 from app.core.memory import SQLiteMemory
 from app.core.shared_context import SharedContextBus
@@ -38,8 +44,18 @@ class MultiAgentOrchestrator:
         session_id: str | None = None,
         event_handler: Callable[[NovaEvent], None] | None = None,
     ) -> None:
-        self.client = Client(host=OLLAMA_HOST)
-        self.model = MODEL_NAME
+        if USE_CLOUD_LLM:
+            from openai import OpenAI
+            self.client = OpenAI(
+                api_key=GROQ_API_KEY,
+                base_url=CLOUD_BASE_URL,
+            )
+            self.model = CLOUD_MODEL_NAME
+        else:
+            from ollama import Client
+            self.client = Client(host=OLLAMA_HOST)
+            self.model = MODEL_NAME
+
         self.memory = SQLiteMemory()
         self.session_id = session_id
         self.session_title: str | None = None
@@ -192,15 +208,25 @@ class MultiAgentOrchestrator:
 
         planner_messages = self._build_planner_messages(max_recent_turns=2)
 
-        response = self.client.chat(
-            model=self.model,
-            format="json",
-            messages=planner_messages,
-            options=options,
-            keep_alive="30m"
-        )
-
-        raw_result = response.message.content or "{}"
+        if USE_CLOUD_LLM:
+            response = self.client.chat.completions.create( # type: ignore
+                model=self.model,
+                response_format={"type": "json_object"},
+                messages=planner_messages, # type: ignore
+                temperature=0.0,
+                max_tokens=1024,
+            )
+            raw_result = response.choices[0].message.content or "{}"
+        else:
+            response = self.client.chat(
+                model=self.model,
+                format="json",
+                messages=planner_messages,
+                options=options,
+                keep_alive="30m"
+            ) # type: ignore
+            raw_result = response.message.content or "{}"
+        
         cleaned_result = self._clean_json_output(raw_result)
 
         # Ensure we capture bracket boundaries if any pre/post text leaked
@@ -467,31 +493,43 @@ class MultiAgentOrchestrator:
             },
         ]
 
-        stream = self.client.chat(
-            model=self.model,
-            messages=synthesis_messages,
-            options={
-                "temperature": 0.2,
-                "num_predict": 1024,
-            },
-            keep_alive="30m",
-            stream=True,
-        )
-
-        collected_chunks = []
-        for chunk in stream:
-            content = chunk.message.content or ""
-            collected_chunks.append(content)
-            self._emit(
-                event=NovaEvent(
-                    event_type="synthesis_chunk",
-                    content=content,
-                    data={
-                        "session_id": self.session_id,
-                        "user_query": user_query,
-                    },
-                )
+        if USE_CLOUD_LLM:
+            stream = self.client.chat.completions.create( # type: ignore
+                model=self.model,
+                messages=synthesis_messages, # type: ignore
+                temperature=0.2,
+                max_tokens=1024,
+                stream=True,
             )
+            collected_chunks = []
+            for chunk in stream:
+                content = chunk.choices[0].delta.content or ""
+                collected_chunks.append(content)
+                self._emit(
+                    event=NovaEvent(
+                        event_type="synthesis_chunk",
+                        content=content,
+                        data={"session_id": self.session_id, "user_query": user_query},
+                    )
+                )
+        else:
+            stream = self.client.chat(
+                model=self.model,
+                messages=synthesis_messages,
+                options={"temperature": 0.2, "num_predict": 1024},
+                stream=True,
+            ) # type: ignore
+            collected_chunks = []
+            for chunk in stream:
+                content = chunk.message.content or ""
+                collected_chunks.append(content)
+                self._emit(
+                    event=NovaEvent(
+                        event_type="synthesis_chunk",
+                        content=content,
+                        data={"session_id": self.session_id, "user_query": user_query},
+                    )
+                )
 
         final_text = "".join(collected_chunks).strip()
 

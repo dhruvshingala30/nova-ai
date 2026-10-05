@@ -19,7 +19,13 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.config import OLLAMA_HOST, VISION_MODEL_NAME
+from app.config import (
+    CLOUD_BASE_URL,
+    CLOUD_VISION_MODEL,
+    GROQ_API_KEY,
+    OLLAMA_HOST,
+    USE_CLOUD_LLM,
+)
 from app.core.workspace_manager import workspace
 from app.models import (
     InspectCSVInput,
@@ -214,20 +220,22 @@ def inspect_pdf_schema(
 
 
 # --------------------------
-# Tool 4: Inspect PDF Schema
+# Tool 4: Inspect Image / Chart
 # --------------------------
 def inspect_image(
-        params: InspectImageInput | None = None,
-        file_path: str = "",
-        prompt: str = "Describe this image in detail.",
+    params: InspectImageInput | None = None,
+    file_path: str = "",
+    prompt: str = "Describe this image in detail.",
 ) -> dict[str, str]:
-    """
-    Inspects an image located in ./nova_workspace using a local vision LLM.
+    """Inspects an image located in ./nova_workspace using a multimodal vision model.
+
+    Supports both Cloud (Groq Vision) and Local (Ollama LLaVA) execution.
     """
     if params is None:
         params = InspectImageInput(file_path=file_path, prompt=prompt)
 
     try:
+        # 1. Path Sandboxing Guardrail
         safe_file_path = workspace.resolve_safe_path(params.file_path)
 
         if not safe_file_path.exists():
@@ -236,6 +244,7 @@ def inspect_image(
                 "message": f"File '{params.file_path}' does not exist.",
             }
 
+        # 2. File Format Guardrail
         supported_exts = {".png", ".jpg", ".jpeg", ".webp"}
         if safe_file_path.suffix.lower() not in supported_exts:
             return {
@@ -243,26 +252,64 @@ def inspect_image(
                 "message": f"File '{params.file_path}' is not a supported image format ({supported_exts})",
             }
 
-        # Encode image to Base64 for Ollama
-        with open(safe_file_path, 'rb') as img_file:
+        # 3. Encode Image to Base64
+        with open(safe_file_path, "rb") as img_file:
             base64_image = base64.b64encode(img_file.read()).decode("utf-8")
 
-        # Query local vision model via Ollama
-        client = Client(host=OLLAMA_HOST)
-        response = client.chat(
-            model=VISION_MODEL_NAME,
-            messages=[
-                {
-                    "role": "user",
-                    "content": params.prompt,
-                    "images": [base64_image],
-                }
-            ],
-            options={"temperature": 0.1},
-            keep_alive="5m",
-        )
+        # 4. Hybrid Routing: Cloud (Groq) vs Local (Ollama)
+        if USE_CLOUD_LLM:
+            from openai import OpenAI
 
-        visual_analysis = response.message.content or "No visual description generated."
+            ext = safe_file_path.suffix.lower().lstrip(".")
+            mime_type = "image/jpeg" if ext in ["jpg", "jpeg"] else f"image/{ext}"
+
+            cloud_client = OpenAI(
+                api_key=GROQ_API_KEY,
+                base_url=CLOUD_BASE_URL,
+            )
+
+            response = cloud_client.chat.completions.create(
+                model=CLOUD_VISION_MODEL,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": params.prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:{mime_type};base64,{base64_image}"
+                                },
+                            },
+                        ],
+                    }
+                ],
+                max_tokens=600,
+                temperature=0.1,
+            )
+
+            visual_analysis = (
+                response.choices[0].message.content
+                or "No visual description generated."
+            )
+
+        else:
+            client = Client(host=OLLAMA_HOST)
+            response = client.chat(
+                model="llava",
+                messages=[
+                    {
+                        "role": "user",
+                        "content": params.prompt,
+                        "images": [base64_image],
+                    }
+                ],
+                options={"temperature": 0.1},
+                keep_alive="5m",
+            )
+            visual_analysis = (
+                response.message.content or "No visual description generated."
+            )
 
         return {
             "status": "success",
@@ -274,7 +321,7 @@ def inspect_image(
     except Exception as e:  # noqa: BLE001
         return {
             "status": "error",
-            "message": f"Failed to inspect image: {str(e)}"  # noqa: RUF010
+            "message": f"Failed to inspect image: {str(e)}",  # noqa: RUF010
         }
 
 
