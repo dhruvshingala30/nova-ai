@@ -6,6 +6,7 @@ event streams, and resolving human-in-the-loop approval decisions.
 
 import asyncio
 import json
+import uuid
 from pathlib import Path
 
 from fastapi import APIRouter
@@ -30,11 +31,11 @@ async def chat(request: ChatRequest):
     """Receives a user message, sets up an event collection queue,
     and runs the orchestrator asynchronously in the background.
     """
-    session_id = request.session_id
+    session_id = request.session_id or str(uuid.uuid4())
 
     # Create an event queue so the frontend can read real-time events via SSE
     queue = session_event_manager.create_queue(
-        session_id=session_id or ""
+        session_id=session_id
     )
 
     # Inject the queue and event loop into the EventCollector
@@ -87,33 +88,37 @@ async def stream_events(session_id: str):
 
     # Async generator that yields SSE data formatted as:
     # event: <event_type>\ndata: <json>\n\n
-    async def event_generator():
-        while True:
-            # Wait for next event from the agent
-            event = await queue.get()
-            payload = {
-                    "event_type": event.event_type,
-                    "content": event.content,
-                    "data": event.data,
-                }
-            yield (
-                f"event: {event.event_type}\n"
-                f"data: {json.dumps(payload)}\n\n"
-            )
-            # Break and close stream when final answer has been sent
-            if event.event_type == "final_answer":
-                break
+    try:
+        async def event_generator():
+            while True:
+                # Wait for next event from the agent
+                event = await queue.get()
+                payload = {
+                        "event_type": event.event_type,
+                        "content": event.content,
+                        "data": event.data,
+                    }
+                yield (
+                    f"event: {event.event_type}\n"
+                    f"data: {json.dumps(payload)}\n\n"
+                )
+                # Break and close stream when final answer has been sent
+                if event.event_type == "final_answer":
+                    break
 
-    return StreamingResponse(
-        content=event_generator(),
-        media_type="text/event-stream",
-    )
+        return StreamingResponse(
+            content=event_generator(),
+            media_type="text/event-stream",
+        )
+    finally:
+        # Clean up the queue when the client disconnects or the stream ends
+        session_event_manager.remove_queue(session_id=session_id)
 
 # ---------------------------------------------------------------------------
 # POST /chat/{session_id}/approval - Human-In-The-Loop (HITL) Decision
 # ---------------------------------------------------------------------------
 @router.post("/chat/{session_id}/approval")
-async def submit_approbal(
+async def submit_approval(
     session_id: str,
     approved: bool,
 ):

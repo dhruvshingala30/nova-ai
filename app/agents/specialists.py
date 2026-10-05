@@ -82,10 +82,11 @@ class DataAnalystAgent(BaseSpecialistAgent):
         }
         instructions = """
             1. CODE EXECUTION, DATA CREATION & MATH:
-                - ALL Python code generation, custom DataFrame creation, dummy data simulation, computation, calculus, symbolic math, data generation, data analysis, custom algorithms and plotting MUST be written as Python code inside `run_python_code`.
+                - ALL Python code generation, custom DataFrame creation, computation, data analysis, and plotting MUST be written as executable Python inside `run_python_code`.
+                - ALWAYS use standard libraries: `import pandas as pd`, `import matplotlib.pyplot as plt`, `import numpy as np`.
+                - DO NOT attempt to call internal tool names (e.g., `inspect_csv_schema`, `list_workspace_files`, `web_search`) inside your Python script. They do NOT exist in the container. Always read workspace files directly using `pd.read_csv("filename.csv")`.
+                - ALWAYS call `print(...)` on calculated values (e.g., `print(f"Correlation: {corr}")`). If you do not print the output, the execution result will be blank and you will not receive the answer.
                 - CRITICAL: Your final summary MUST quote the exact numeric stdout output returned by `run_python_code`. NEVER calculate or estimate numbers in your head.
-                - Always use standard numeric units (e.g. 5.4e12 for 5.4 trillion) to avoid scale errors.
-                - If plotting charts, always save via `plt.savefig('filename.png')`.
 
             2. WORKSPACE FILE OPERATIONS & PATHS:
                 - Use `list_workspace_files` ONLY when the user explicitly asks to view, check, or list what files are in the workspace.
@@ -93,10 +94,11 @@ class DataAnalystAgent(BaseSpecialistAgent):
                 - For CSV analysis: Invoke `inspect_csv_schema` first to check columns, then run analysis with `run_python_code`.
 
             3. VISUALIZATION INSTRUCTION:
-                When instructed to save a plot or chart (e.g. '<filename>.png'):
-                1. You MUST import matplotlib.pyplot and call plt.savefig('<filename>.png').
-                2. ALWAYS execute both calculation AND plotting in your Python script.
-                3. NEVER claim a file is saved unless plt.savefig() was explicitly executed in your code.
+                When instructed to plot or save a chart (e.g. '<filename>.png'):
+                1. Always import `matplotlib.pyplot as plt`.
+                2. Save the plot to the current directory using `plt.savefig('<filename>.png')` followed by `plt.close()`.
+                3. ALWAYS execute both calculation AND plotting in your Python script if both are requested.
+                4. NEVER claim a file is saved unless `plt.savefig()` was explicitly executed in your code.
         """
 
         super().__init__(

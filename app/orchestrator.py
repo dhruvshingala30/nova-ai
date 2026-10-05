@@ -15,7 +15,6 @@ from datetime import datetime
 from pathlib import Path
 
 from ollama import Client
-from pydantic import ValidationError
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -187,7 +186,7 @@ class MultiAgentOrchestrator:
         """Sends sanitized context history to Ollama and parses structured JSON output."""
         options = {
             "temperature": 0.0,  # Low temperature reduces branching & deliberation
-            "num_predict": 300,  # Strict token ceiling (plans never exceed ~400 tokens)
+            "num_predict": 1024,  # Strict token ceiling (plans never exceed ~400 tokens)
             "num_ctx": 4096,  # Avoid unnecessarily bloated 16k/32k buffers for planner
         }
 
@@ -204,14 +203,21 @@ class MultiAgentOrchestrator:
         raw_result = response.message.content or "{}"
         cleaned_result = self._clean_json_output(raw_result)
 
+        # Ensure we capture bracket boundaries if any pre/post text leaked
+        match = re.search(r"\{.*\}", cleaned_result, re.DOTALL)
+        if match:
+            cleaned_result = match.group(0)
+
         try:
             return SupervisorDecision.model_validate_json(cleaned_result)
-        except ValidationError:
-            # Fallback if unparsable
+        except Exception as e:  # noqa: BLE001
+            # If the supervisor output is completely malformed, formulate a safe direct reply
+            # instead of exposing raw internal JSON to the end-user.
             return SupervisorDecision(
                 ACTION="DIRECT_ANSWER",
-                REASONING="Direct fallback",
-                FINAL_ANSWER=cleaned_result,
+                REASONING=f"Failed to parse planning plan: {e}",
+                FINAL_ANSWER="I encountered and issue planning this multi-step task. " \
+                "Please try rephrasing your request or breaking it into smaller parts.",
             )
 
 
@@ -225,7 +231,7 @@ class MultiAgentOrchestrator:
         Returns:
             str: Final synthesized response.
         """
-        # Auto-generate session title if needed
+        # Auto-generate session id if needed
         if self.session_id is None:
             self.session_id = str(uuid.uuid4())
 
@@ -339,23 +345,23 @@ class MultiAgentOrchestrator:
             #     content=f"Supervisor Formulated Multi-Agent Plan ({len(subtasks)} Subtasks)",
             #     tool=None,
             # )
+            plan_lines = []
             for st in subtasks:
                 agent_icon = (
                     "🌐" if st.assigned_agent == AgentRole.RESEARCHER
                     else ("📊" if st.assigned_agent == AgentRole.DATA_ANALYST else "📄")
                 )
+                plan_lines.append(f"   {st.task_id}. {agent_icon} [{st.assigned_agent.value}]: {st.instruction}")
 
-                self._emit(
-                    event=NovaEvent(
-                        event_type="subtask_list",
-                        content=f"   {st.task_id}. {agent_icon} [{st.assigned_agent.value}]: {st.instruction}",
-                        data={
-                            "task_id": st.task_id,
-                            "agent": f"{agent_icon} [{st.assigned_agent.value}]",
-                            "instruction": st.instruction,
-                        },
-                    )
+            self._emit(
+                event=NovaEvent(
+                    event_type="subtask_list",
+                    content="\n".join(plan_lines),
+                    data={
+                        "subtasks": [st.model_dump() for st in subtasks],
+                    },
                 )
+            )
                 # print(
                 #     f"   {st.task_id}. {agent_icon} [{st.assigned_agent.value}]: {st.instruction}"
                 # )
