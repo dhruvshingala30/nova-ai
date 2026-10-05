@@ -15,7 +15,7 @@ load_dotenv()
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Mode switch
-USE_CLOUD_LLM = os.getenv(key="USER_CLOUD_LLM", default="false").lower() == "true"
+USE_CLOUD_LLM = os.getenv(key="USE_CLOUD_LLM", default="false").lower() == "true"
 
 # -------------------------------
 # Cloud inference (Groq / OpenRouter)
