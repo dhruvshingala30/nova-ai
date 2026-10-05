@@ -25,6 +25,7 @@ from app.config import (
     GROQ_API_KEY,
     OLLAMA_HOST,
     USE_CLOUD_LLM,
+    VISION_MODEL_NAME,
 )
 from app.core.workspace_manager import workspace
 from app.models import (
@@ -296,7 +297,7 @@ def inspect_image(
         else:
             client = Client(host=OLLAMA_HOST)
             response = client.chat(
-                model="llava",
+                model=VISION_MODEL_NAME,
                 messages=[
                     {
                         "role": "user",

@@ -21,9 +21,9 @@ USE_CLOUD_LLM = os.getenv(key="USE_CLOUD_LLM", default="false").lower() == "true
 # Cloud inference (Groq / OpenRouter)
 # -------------------------------
 GROQ_API_KEY = os.getenv(key="GROQ_API_KEY", default="")
-CLOUD_MODEL_NAME = os.getenv(key="CLOUD_MODEL_NAME", default="llama-3.3-70b-versatile")
+CLOUD_MODEL_NAME = os.getenv(key="CLOUD_MODEL_NAME", default="openai/gpt-oss-120b")
 CLOUD_BASE_URL = os.getenv(key="CLOUD_BASE_URL", default="https://api.groq.com/openai/v1")
-CLOUD_VISION_MODEL = os.getenv(key="CLOUD_VISION_MODEL", default="llama-3.2-11b-vision-preview")
+CLOUD_VISION_MODEL = os.getenv(key="CLOUD_VISION_MODEL", default="qwen/qwen3.8-27b")
 
 # -------------------------------
 # Local Ollama fallback
