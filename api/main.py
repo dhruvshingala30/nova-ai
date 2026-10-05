@@ -28,7 +28,7 @@ app = FastAPI(
 # to make cross-origin requests to this server without getting blocked by the browser.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],  # Allow all HTTP verbs (GET, POST, OPTIONS, etc.)
     allow_headers=["*"],  # Allow all headers
