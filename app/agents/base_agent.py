@@ -10,13 +10,19 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from ollama import Client
 from pydantic import ValidationError
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
 from api.core.hitl_manager import hitl_manager
-from app.config import MODEL_NAME, OLLAMA_HOST
+from app.config import (
+    CLOUD_BASE_URL,
+    CLOUD_MODEL_NAME,
+    GROQ_API_KEY,
+    MODEL_NAME,
+    OLLAMA_HOST,
+    USE_CLOUD_LLM,
+)
 from app.core.event import NovaEvent
 from app.models import OutputFormat, TaskResult
 from app.prompts import SPECIALIST_PROMPT
@@ -53,12 +59,18 @@ class BaseSpecialistAgent:
         self.role_description = role_description
         self.system_instructions = system_instructions
         self.scoped_tools = scoped_tools
-        self.model = model
         self.max_turns = max_turns
         self.event_handler = event_handler
-
-        self.client = Client(host=OLLAMA_HOST)
         self.nova = NovaAI()
+
+        if USE_CLOUD_LLM:
+            from openai import OpenAI
+            self.client = OpenAI(api_key=GROQ_API_KEY, base_url=CLOUD_BASE_URL)
+            self.model = CLOUD_MODEL_NAME
+        else:
+            from ollama import Client
+            self.client = Client(host=OLLAMA_HOST)
+            self.model = model
 
     def _emit(self, event: NovaEvent):
         """Emits an event to the registered event handler."""
@@ -192,17 +204,42 @@ class BaseSpecialistAgent:
         while turns < self.max_turns:
             turns += 1
 
-            # Query the local LLM
-            response = self.client.chat(
-                model=self.model,
-                format=OutputFormat.model_json_schema(),
-                messages=messages,
-                options={"temperature": 0.0},
-                keep_alive="30m"
-            )
+            if USE_CLOUD_LLM:
+                # Query the cloud LLM
+                response = self.client.chat.completions.create(  # type: ignore
+                    model=self.model,
+                    response_format={
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": "OutputFormat",
+                            "strict": False,
+                            "schema": OutputFormat.model_json_schema(),
+                        }
+                    },
+                    messages=messages,  # type: ignore
+                    temperature=0.0,
+                    max_tokens=1024,
+                )
+                raw_content = response.choices[0].message.content or "{}"
+            else:
+                # Query the local LLM
+                response = self.client.chat(
+                    model=self.model,
+                    format=OutputFormat.model_json_schema(),
+                    messages=messages,
+                    options={"temperature": 0.0},
+                    keep_alive="30m",
+                    max_tokens=1024,
+                ) # type: ignore
+                raw_content = response.message.content or "{}"
 
-            raw_content = response.message.content or "{}"
             cleaned = self._clean_json(raw_content)
+
+            # Add bracket boundary safeguard (identical to what you have in orchestrator.py):
+            match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+            if match:
+                cleaned = match.group(0)
+                
             messages.append({"role": "assistant", "content": cleaned})
 
             try:
