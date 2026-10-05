@@ -205,20 +205,20 @@ class BaseSpecialistAgent:
             turns += 1
 
             if USE_CLOUD_LLM:
+                schema_instruction = {
+                    "role": "system",
+                    "content": (
+                        "CRITICAL: You must output valid JSON strictly conforming to this schema:\n"
+                        f"{OutputFormat.model_json_schema()}\n"
+                    )
+                }
                 # Query the cloud LLM
                 response = self.client.chat.completions.create(  # type: ignore
                     model=self.model,
-                    response_format={
-                        "type": "json_schema",
-                        "json_schema": {
-                            "name": "OutputFormat",
-                            "strict": False,
-                            "schema": OutputFormat.model_json_schema(),
-                        }
-                    },
-                    messages=messages,  # type: ignore
+                    response_format={"type": "json_object"},
+                    messages=[*messages, schema_instruction],  # type: ignore
                     temperature=0.0,
-                    max_tokens=1024,
+                    max_tokens=2048,
                 )
                 raw_content = response.choices[0].message.content or "{}"
             else:
@@ -239,7 +239,7 @@ class BaseSpecialistAgent:
             match = re.search(r"\{.*\}", cleaned, re.DOTALL)
             if match:
                 cleaned = match.group(0)
-                
+
             messages.append({"role": "assistant", "content": cleaned})
 
             try:
