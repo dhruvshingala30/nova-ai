@@ -9,10 +9,14 @@ Orchestrates Phase 3.1 multi-agent workflows by:
 """
 
 import re
+import time
 import uuid
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from typing import Any
+
+from pydantic import ValidationError
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
@@ -20,6 +24,7 @@ from app.agents.specialists import DataAnalystAgent, DocVisionAgent, ResearchAge
 from app.config import (
     CLOUD_BASE_URL,
     CLOUD_MODEL_NAME,
+    CLOUD_VISION_MODEL,
     GROQ_API_KEY,
     MAX_HISTORY,
     MODEL_NAME,
@@ -28,6 +33,7 @@ from app.config import (
 )
 from app.core.event import NovaEvent
 from app.core.memory import SQLiteMemory
+from app.core.session_store import session_store
 from app.core.shared_context import SharedContextBus
 from app.models import AgentRole, SubTask, SupervisorDecision, TaskResult
 from app.prompts import SUPERVISOR_PROMPT, SYNTHESIS_SYSTEM_PROMPT
@@ -49,6 +55,7 @@ class MultiAgentOrchestrator:
             self.client = OpenAI(
                 api_key=GROQ_API_KEY,
                 base_url=CLOUD_BASE_URL,
+                timeout=30.0,
             )
             self.model = CLOUD_MODEL_NAME
         else:
@@ -129,7 +136,7 @@ class MultiAgentOrchestrator:
         """
         Builds a compact message list specifically for planning.
         Keeps system rules and the current query, summarizing older turns
-        to minimize prompt evaluation time (prefill latency).
+        and stripping raw markdown tables to prevent planner schema breakage.
         """
         # Ensure root system message is current
         self._update_system_message()
@@ -154,8 +161,9 @@ class MultiAgentOrchestrator:
             recap_snippets = []
             for msg in older_history:
                 role = "User" if msg["role"] == "user" else "Assistant"
-                # Truncate content to 120 chars to prevent token bloat
-                snippet = msg["content"].replace("\n", " ").strip()[:120]
+                # Strip markdown table syntax (| col1 | col2 |) and compress newlines
+                clean_text = re.sub(r"\|.*\|", "[table data]", msg["content"])
+                snippet = " ".join(clean_text.split())[:120]
                 recap_snippets.append(f"- {role}: {snippet}")
 
             recap_text = (
@@ -164,12 +172,19 @@ class MultiAgentOrchestrator:
             )
             planner_messages.append({"role": "system", "content": recap_text})
 
-        # Append recent raw turns (truncated slightly to guarantee no tool bloat)
+        # Append recent raw turns (sanitizing large table outputs)
         for msg in recent_history:
             content = msg["content"]
-            # Cap previous assistant messages so past large outputs don't flood the planner
-            if msg["role"] == "assistant" and len(content) > 300:
-                content = content[:300] + "... [prior findings summarized]"
+            # If the assistant message contains large markdown tables or lengthy outputs, summarize it
+            if msg["role"] == "assistant":
+                # Replace multi-line tables with a short placeholder so pipe delimiters don't corrupt JSON
+                content = re.sub(
+                    r"(\|.*\|\n?)+",
+                    "\n[Tabular data generated and saved to workspace]\n",
+                    content,
+                )
+                if len(content) > 300:
+                    content = content[:300] + "... [prior findings summarized]"
             planner_messages.append({"role": msg["role"], "content": content})
 
         # Append the actual new user query
@@ -199,52 +214,75 @@ class MultiAgentOrchestrator:
             self.context_bus.clear()
 
     def chat(self) -> SupervisorDecision:
-        """Sends sanitized context history to Ollama and parses structured JSON output."""
-        options = {
-            "temperature": 0.0,  # Low temperature reduces branching & deliberation
-            "num_predict": 1024,  # Strict token ceiling (plans never exceed ~400 tokens)
-            "num_ctx": 4096,  # Avoid unnecessarily bloated 16k/32k buffers for planner
+        """Sends sanitized context history to LLM and parses structured JSON output with fallback retry."""
+        planner_messages = self._build_planner_messages(max_recent_turns=2)
+        schema_json = SupervisorDecision.model_json_schema()
+
+        # Explicitly instruct the model with the exact schema contract
+        schema_prompt = {
+            "role": "system",
+            "content": (
+                "CRITICAL OUTPUT INSTRUCTION:\n"
+                "You must respond ONLY with a single valid JSON object strictly matching this schema:\n"
+                f"{schema_json}\n"
+                "DO NOT wrap in markdown formatting. DO NOT output explanations outside the JSON."
+            ),
         }
 
-        planner_messages = self._build_planner_messages(max_recent_turns=2)
+        messages_to_send = [*planner_messages, schema_prompt]
+        max_attempts = 2
 
-        if USE_CLOUD_LLM:
-            response = self.client.chat.completions.create( # type: ignore
-                model=self.model,
-                response_format={"type": "json_object"},
-                messages=planner_messages, # type: ignore
-                temperature=0.0,
-                max_tokens=1024,
-            )
-            raw_result = response.choices[0].message.content or "{}"
-        else:
-            response = self.client.chat(
-                model=self.model,
-                format="json",
-                messages=planner_messages,
-                options=options,
-                keep_alive="30m"
-            ) # type: ignore
-            raw_result = response.message.content or "{}"
-        
-        cleaned_result = self._clean_json_output(raw_result)
+        for attempt in range(max_attempts):
+            try:
+                if USE_CLOUD_LLM:
+                    response = self.client.chat.completions.create( # type: ignore
+                        model=self.model,
+                        response_format={"type": "json_object"},
+                        messages=messages_to_send,
+                        temperature=0.0,
+                        max_tokens=1024,
+                    )
+                    raw_result = response.choices[0].message.content or "{}"
+                else:
+                    options = {
+                        "temperature": 0.0,
+                        "num_predict": 1024,
+                        "num_ctx": 4096,
+                    }
+                    response = self.client.chat(
+                        model=self.model,
+                        format=schema_json,
+                        messages=messages_to_send,
+                        options=options,
+                        keep_alive="30m",
+                    ) # type: ignore
+                    raw_result = response.message.content or "{}"
 
-        # Ensure we capture bracket boundaries if any pre/post text leaked
-        match = re.search(r"\{.*\}", cleaned_result, re.DOTALL)
-        if match:
-            cleaned_result = match.group(0)
+                # 1. Strip Markdown code fences
+                cleaned_result = self._clean_json_output(raw_result)
 
-        try:
-            return SupervisorDecision.model_validate_json(cleaned_result)
-        except Exception as e:  # noqa: BLE001
-            # If the supervisor output is completely malformed, formulate a safe direct reply
-            # instead of exposing raw internal JSON to the end-user.
-            return SupervisorDecision(
-                ACTION="DIRECT_ANSWER",
-                REASONING=f"Failed to parse planning plan: {e}",
-                FINAL_ANSWER="I encountered and issue planning this multi-step task. " \
-                "Please try rephrasing your request or breaking it into smaller parts.",
-            )
+                # 2. Extract outermost JSON object bracket boundaries
+                match = re.search(r"\{.*\}", cleaned_result, re.DOTALL)
+                if match:
+                    cleaned_result = match.group(0)
+
+                # 3. Validate against Pydantic schema
+                decision = SupervisorDecision.model_validate_json(cleaned_result)
+                if decision.ACTION:
+                    return decision
+
+            except (ValidationError, Exception) as err:  # noqa: BLE001
+                print(f"⚠️ [Planner] Attempt {attempt + 1} validation error: {err}")
+                if attempt < max_attempts - 1:
+                    time.sleep(1.0)
+                    continue
+
+        # Safe fallback if both attempts fail
+        return SupervisorDecision(
+            ACTION="DIRECT_ANSWER",
+            REASONING="Planner schema could not be parsed after retry.",
+            FINAL_ANSWER="I encountered an issue planning this multi-step task. Please try rephrasing your request.",
+        )
 
 
     def run(self, user_query: str) -> str:
@@ -460,6 +498,21 @@ class MultiAgentOrchestrator:
                     session_id=self.session_id
                 )
 
+                for artifact in task_result.artifacts:
+                    if isinstance(artifact, dict) and "base64" in artifact:
+                        self._emit(
+                            event=NovaEvent(
+                                event_type="artifact_generated",
+                                content=f"Generated artifact: {artifact['filename']}",
+                                data={
+                                    "session_id": self.session_id,
+                                    "filename": artifact["filename"],
+                                    "mime_type": artifact["mime_type"],
+                                    "base64": artifact["base64"],
+                                },
+                            )
+                        )
+
                 # Publish result to shared blackboard
                 self.context_bus.publish_result(task_result)
 
@@ -482,23 +535,45 @@ class MultiAgentOrchestrator:
             )
         )
 
+        # Check if there are visual plots available from this session to explain
+        recent_visuals = session_store.get_latest_visuals(self.session_id)
+        user_content_payload: list[dict[str, Any]] = [
+            {
+                "type": "text",
+                "text": (
+                    f"Original User Query: {user_query}\n\n"
+                    f"Team Findings:\n{all_findings}\n\n"
+                ),
+            }
+        ]
+
+        # Attach image directly so the LLM can explain it in-line
+        for visual in recent_visuals:
+            user_content_payload.append(
+                {
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/png;base64,{visual['b64']}"},
+                }
+            )
+
         synthesis_messages = [
             {"role": "system", "content": SYNTHESIS_SYSTEM_PROMPT},
             {
                 "role": "user",
-                "content": (
-                    f"Original User Query: {user_query}\n\n"
-                    f"Team Findings:\n{all_findings}\n\n"
-                ),
+                "content": user_content_payload,
             },
         ]
 
+        target_synthesis_model = self.model
+        if recent_visuals:
+            target_synthesis_model = CLOUD_VISION_MODEL
+
         if USE_CLOUD_LLM:
             stream = self.client.chat.completions.create( # type: ignore
-                model=self.model,
+                model=target_synthesis_model,
                 messages=synthesis_messages, # type: ignore
                 temperature=0.2,
-                max_tokens=1024,
+                max_tokens=4096,
                 stream=True,
             )
             collected_chunks = []
@@ -516,7 +591,7 @@ class MultiAgentOrchestrator:
             stream = self.client.chat(
                 model=self.model,
                 messages=synthesis_messages,
-                options={"temperature": 0.2, "num_predict": 1024},
+                options={"temperature": 0.2, "num_predict": 4096},
                 stream=True,
             ) # type: ignore
             collected_chunks = []

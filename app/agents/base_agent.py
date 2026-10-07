@@ -65,7 +65,7 @@ class BaseSpecialistAgent:
 
         if USE_CLOUD_LLM:
             from openai import OpenAI
-            self.client = OpenAI(api_key=GROQ_API_KEY, base_url=CLOUD_BASE_URL)
+            self.client = OpenAI(api_key=GROQ_API_KEY, base_url=CLOUD_BASE_URL, timeout=30.0,)
             self.model = CLOUD_MODEL_NAME
         else:
             from ollama import Client
@@ -206,6 +206,7 @@ class BaseSpecialistAgent:
 
         turns = 0
         detected_artifacts: list[str] = []
+        captured_artifacts: list[dict[str, Any]] = []
         hitl_denied = False
 
         while turns < self.max_turns:
@@ -393,7 +394,16 @@ class BaseSpecialistAgent:
                         )
                 # ---------------------------------------------------------
 
-                tool_output = self.execute_tool(parsed.TOOL, tool_input)
+                tool_output = self.execute_tool(
+                    tool_name=parsed.TOOL, 
+                    tool_input=tool_input, 
+                    session_id=session_id,
+                )
+                if isinstance(tool_output, dict) and "artifacts" in tool_output:
+                    for art in tool_output["artifacts"]:
+                        if isinstance(art, dict) and "base64" in art:
+                            captured_artifacts.append(art)
+
                 obs_str = create_observation(parsed.TOOL, tool_input, tool_output)
 
                 messages.append(
@@ -423,29 +433,29 @@ class BaseSpecialistAgent:
             # -------------------------------------------------------------
             elif parsed.STEP == "ANSWER":
                 # 1. Detect if the instruction demanded a saved file artifact (e.g., .png, .jpg, .csv)
-                target_artifacts = re.findall(
-                    r"['\"]?([\w\-_\.]+\.(?:png|jpg|jpeg|csv|json))['\"]?",
-                    instruction,
-                    flags=re.IGNORECASE,
-                )
+                # target_artifacts = re.findall(
+                #     r"['\"]?([\w\-_\.]+\.(?:png|jpg|jpeg|csv|json))['\"]?",
+                #     instruction,
+                #     flags=re.IGNORECASE,
+                # )
 
-                # 2. Check if the demanded file actually exists in the workspace
-                workspace_dir = PROJECT_ROOT / "nova_workspace"
-                missing_artifacts = [
-                    f for f in target_artifacts if not (workspace_dir / f).exists()
-                ]
+                # # 2. Check if the demanded file actually exists in the workspace
+                # workspace_dir = PROJECT_ROOT / "nova_workspace"
+                # missing_artifacts = [
+                #     f for f in target_artifacts if not (workspace_dir / f).exists()
+                # ]
 
-                # 3. If an artifact is missing, reject ANSWER and force the agent to generate it
-                if missing_artifacts and not hitl_denied:
-                    missing_str = ", ".join(f"'{m}'" for m in missing_artifacts)
-                    warning_msg = (
-                        f"[SYSTEM WARNING]: You were instructed to generate and save {missing_str}, "
-                        f"but the file does not exist in the workspace ({workspace_dir}). "
-                        "You MUST execute `STEP: TOOL` with `run_python_code` calling matplotlib/pandas "
-                        f"(e.g., plt.savefig({missing_str})) to create the file before outputting `STEP: ANSWER`."
-                    )
-                    messages.append({"role": "user", "content": warning_msg})
-                    continue
+                # # 3. If an artifact is missing, reject ANSWER and force the agent to generate it
+                # if missing_artifacts and not hitl_denied:
+                #     missing_str = ", ".join(f"'{m}'" for m in missing_artifacts)
+                #     warning_msg = (
+                #         f"[SYSTEM WARNING]: You were instructed to generate and save {missing_str}, "
+                #         f"but the file does not exist in the workspace ({workspace_dir}). "
+                #         "You MUST execute `STEP: TOOL` with `run_python_code` calling matplotlib/pandas "
+                #         f"(e.g., plt.savefig({missing_str})) to create the file before outputting `STEP: ANSWER`."
+                #     )
+                #     messages.append({"role": "user", "content": warning_msg})
+                #     continue
 
                 # 4. If all checks pass (or HITL was denied), conclude the subtask cleanly
                 self._emit(
@@ -469,7 +479,7 @@ class BaseSpecialistAgent:
                     assigned_agent=self.name,
                     status="FAILED" if hitl_denied else "SUCCESS",
                     summary=parsed.CONTENT,
-                    artifacts=detected_artifacts,
+                    artifacts=captured_artifacts if captured_artifacts else detected_artifacts,
                 )
             
 
@@ -488,5 +498,5 @@ class BaseSpecialistAgent:
             assigned_agent=self.name,
             status="FAILED" if hitl_denied else "SUCCESS",
             summary=f"{self.name} completed bounded turns. Latest findings: {messages[-1]['content']}",
-            artifacts=detected_artifacts,
+            artifacts=captured_artifacts if captured_artifacts else detected_artifacts,
         )

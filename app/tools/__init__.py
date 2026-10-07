@@ -58,7 +58,7 @@ AVAILABLE_TOOLS = {
     "list_workspace_files": {
         "function": list_workspace_files,
         "schema": ListFilesInput,
-        "description": "Lists directory file names and sizes in ./nova_workspace. Use ONLY when the user explicitly asks to view/list directory contents.",
+        "description": "Lists active files and datasets attached to the current chat session. Use ONLY when the user asks to see uploaded files.",
         "parameters": {
             "subfolder": "str (optional)",
             "pattern": "str (optional)",
@@ -67,7 +67,7 @@ AVAILABLE_TOOLS = {
     "inspect_csv_schema": {
         "function": inspect_csv_schema,
         "schema": InspectCSVInput,
-        "description": "Inspects columns, data types, and sample rows of a CSV/TSV before running Python code on it.",
+        "description": "Inspects columns, data types, and sample rows of a session CSV/TSV before running Python code on it.",
         "parameters": {
             "file_path": "str",
             "sample_rows": "int (optional, default=5)",
@@ -99,8 +99,8 @@ AVAILABLE_TOOLS = {
         "function": inspect_image,
         "schema": InspectImageInput,
         "description": (
-            "Analyzes, describes, and extracts information from images or charts (.png, .jpg, .webp) "
-            "located in the workspace using multimodal vision. MANDATORY whenever the user asks about an image, photo, plot, diagram, or chart."
+            "Analyzes, describes, and extracts visual information from in-memory charts or images (.png, .jpg, .webp). "
+            "MANDATORY whenever the user asks to inspect or verify a generated plot or uploaded image."
         ),
         "parameters": {
             "file_path": "str",

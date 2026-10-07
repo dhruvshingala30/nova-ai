@@ -6,6 +6,7 @@ and enables downstream agents to consume preceding task results without context 
 """
 
 from pathlib import Path
+from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -21,19 +22,25 @@ class SharedContextBus:
         # Dictionary mapping task_id (int) to TaskResult object
         self._task_results: dict[int, TaskResult] = {}
         # Track generated file artifacts (e.g., 'sales_chart.png')
-        self._artifacts: list[str] = []
+        self._artifacts: list[dict[str, Any] | str] = []
 
     def publish_result(self, result: TaskResult) -> None:
-        """
-        Stores the structured outcome of a completed subtask.
-
-        Args:
-            result (TaskResult): The outcome payload from a worker agent.
-        """
+        """Stores the structured outcome of a completed subtask."""
         self._task_results[result.task_id] = result
+
         # Collect any artifacts declared by the worker
         for artifact in result.artifacts:
-            if artifact not in self._artifacts:
+            # Extract filename for clean deduplication
+            art_name = (
+                artifact.get("filename") if isinstance(artifact, dict) else artifact
+            )
+
+            # Check if an artifact with this name is already tracked
+            already_tracked = any(
+                (a.get("filename") if isinstance(a, dict) else a) == art_name
+                for a in self._artifacts
+            )
+            if not already_tracked:
                 self._artifacts.append(artifact)
 
     def get_result(self, task_id: int) -> TaskResult | None:
@@ -60,7 +67,14 @@ class SharedContextBus:
                 f"Summary: {res.summary}"
             )
             if res.artifacts:
-                lines.append(f"Generated Files: {', '.join(res.artifacts)}")
+                # Handle both dict objects and plain string filenames
+                artifact_names = [
+                    item.get("filename", "unknown")
+                    if isinstance(item, dict)
+                    else str(item)
+                    for item in res.artifacts
+                ]
+                lines.append(f"Generated Files: {', '.join(artifact_names)}")
             if res.error_message:
                 lines.append(f"Error Log: {res.error_message}")
             lines.append("-" * 40)

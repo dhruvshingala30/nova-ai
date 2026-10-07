@@ -9,3 +9,5 @@ __pycache__/
 .vscode/
 
 data/
+nova_workspace/
+nova_workspaces/

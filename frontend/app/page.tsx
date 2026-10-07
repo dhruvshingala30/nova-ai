@@ -14,12 +14,19 @@ type NovaEvent = {
   data?: Record<string, unknown>;
 };
 
+type GeneratedArtifact = {
+  filename: string;
+  mime_type: string;
+  base64: string;
+};
+
 type ChatTurn = {
   id: string;
   userMessage: string;
   events: NovaEvent[];
   assistantMessage?: string;
   activityExpanded: boolean;
+  artifacts?: GeneratedArtifact[];
 };
 
 type ChatSession = {
@@ -515,11 +522,12 @@ export default function Home() {
   const [isUploading, setIsUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
 
-  const loadWorkspaceFiles = async (activeId: string | null) => {
-    if (!activeId) return;
+  const loadWorkspaceFiles = async (activeId?: string | null) => {
     try {
+      // Fallback to "default" so the UI immediately shows baseline files (users.csv, happy.csv, etc.)
+      const targetId = activeId || "default";
       const res = await fetch(
-        `${API_BASE_URL}/api/workspace/${activeId}/files`,
+        `${API_BASE_URL}/api/workspace/${targetId}/files`,
       );
       if (res.ok) {
         const data = await res.json();
@@ -530,21 +538,36 @@ export default function Home() {
     }
   };
 
+  // Runs on initial mount AND whenever the active sessionId changes
   useEffect(() => {
-    if (sessionId) {
-      loadWorkspaceFiles(sessionId);
-    }
+    loadWorkspaceFiles(sessionId);
   }, [sessionId]);
 
   const uploadWorkspaceFile = async (file: File) => {
+    // 1. Lock activeId and ensure sessionId state is synchronized
     const activeId = sessionId || crypto.randomUUID();
-    if (!sessionId) setSessionId(activeId);
+    if (!sessionId) {
+      setSessionId(activeId);
+    }
+
+    // 2. Optimistic UI update: Display the file in the sidebar immediately
+    const tempFile: WorkspaceFile = {
+      name: file.name,
+      size_bytes: file.size,
+      is_image: /\.(png|jpe?g|webp)$/i.test(file.name),
+      is_template: false,
+    };
+    setWorkspaceFiles((prev) => [
+      tempFile,
+      ...prev.filter((f) => f.name !== file.name),
+    ]);
 
     const formData = new FormData();
     formData.append("file", file);
 
     setIsUploading(true);
     try {
+      // 3. Single clean fetch without manual Content-Type header
       const res = await fetch(
         `${API_BASE_URL}/api/workspace/${activeId}/upload`,
         {
@@ -552,11 +575,17 @@ export default function Home() {
           body: formData,
         },
       );
-      if (res.ok) {
-        await loadWorkspaceFiles(activeId);
+
+      if (!res.ok) {
+        throw new Error(`Upload failed with status ${res.status}`);
       }
+
+      // 4. Confirm with backend list
+      await loadWorkspaceFiles(activeId);
     } catch (err) {
       console.error("Upload error:", err);
+      // Roll back optimistic entry on failure
+      setWorkspaceFiles((prev) => prev.filter((f) => f.name !== file.name));
     } finally {
       setIsUploading(false);
     }
@@ -642,6 +671,7 @@ export default function Home() {
         "approval_granted",
         "approval_denied",
         "subtask_skipped",
+        "artifact_generated",
         "agent_completed",
         "synthesis_started",
         "synthesis_chunk",
@@ -667,9 +697,9 @@ export default function Home() {
               return;
             }
 
+            // 1. Human-in-the-loop approval
             if (eventType === "approval_required") {
               const eventData = novaEvent.data ?? {};
-
               setPendingApproval({
                 turnId,
                 sessionId: data.session_id,
@@ -688,7 +718,42 @@ export default function Home() {
               });
             }
 
-            // 1. STREAMING CHUNKS: Append tokens directly to the assistant's message buffer
+            // 2. Auto-refresh files on key milestone events
+            if (
+              eventType === "session_created" ||
+              eventType === "agent_completed" ||
+              eventType === "tool_result" ||
+              eventType === "final_answer"
+            ) {
+              const activeSession =
+                (novaEvent.data?.session_id as string) ||
+                data.session_id ||
+                sessionId;
+              loadWorkspaceFiles(activeSession);
+            }
+
+            // 3. In-memory Artifact Generated (Images, CSVs, etc.)
+            if (eventType === "artifact_generated") {
+              const artifact: GeneratedArtifact = {
+                filename: (novaEvent.data?.filename as string) || "file",
+                mime_type:
+                  (novaEvent.data?.mime_type as string) ||
+                  "application/octet-stream",
+                base64: novaEvent.data?.base64 as string,
+              };
+              setChatTurns((previous) =>
+                previous.map((turn) =>
+                  turn.id === turnId
+                    ? {
+                        ...turn,
+                        artifacts: [...(turn.artifacts || []), artifact],
+                      }
+                    : turn,
+                ),
+              );
+            }
+
+            // 4. Streaming Chunks (Synthesis)
             else if (eventType === "synthesis_chunk") {
               setChatTurns((previous) =>
                 previous.map((turn) =>
@@ -703,7 +768,7 @@ export default function Home() {
               );
             }
 
-            // 2. BACKGROUND TITLE UPDATE: Rename sidebar title without reloading
+            // 5. Session Title Rename
             else if (eventType === "session_updated") {
               const updatedTitle = novaEvent.data?.session_title as string;
               const targetSessionId =
@@ -720,8 +785,8 @@ export default function Home() {
               }
             }
 
-            // 3. final_answer completes this chat turn
-            if (eventType === "final_answer") {
+            // 6. Final Answer Turn Completion
+            else if (eventType === "final_answer") {
               streamCompleted = true;
               eventSource.close();
 
@@ -738,8 +803,10 @@ export default function Home() {
 
               setIsRunning(false);
               loadSessions();
-            } else {
-              // Add the event to THIS chat turn
+            }
+
+            // 7. General Activity Events (Dispatched, Tool Invocation, Results, Planning)
+            else {
               setChatTurns((previous) =>
                 previous.map((turn) =>
                   turn.id === turnId
@@ -1208,6 +1275,53 @@ export default function Home() {
                           </div>
                         );
                       })()}
+
+                    {/* In-Line Generated Artifacts with 1-Click Client Download */}
+                    {turn.artifacts && turn.artifacts.length > 0 && (
+                      <div className="mt-4 space-y-3">
+                        {turn.artifacts.map((art) => (
+                          <div
+                            key={art.filename}
+                            className="rounded-xl border border-gray-200 bg-gray-50 p-3"
+                          >
+                            {art.mime_type.startsWith("image/") ? (
+                              <div className="space-y-2">
+                                <img
+                                  src={`data:${art.mime_type};base64,${art.base64}`}
+                                  alt={art.filename}
+                                  className="max-h-96 rounded-lg border bg-white object-contain shadow-sm"
+                                />
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-medium text-gray-700">
+                                    {art.filename}
+                                  </span>
+                                  <a
+                                    href={`data:${art.mime_type};base64,${art.base64}`}
+                                    download={art.filename}
+                                    className="rounded-lg bg-gray-900 px-3 py-1 text-xs font-medium text-white hover:bg-black"
+                                  >
+                                    Download Image
+                                  </a>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-medium text-gray-800">
+                                  📊 {art.filename}
+                                </span>
+                                <a
+                                  href={`data:${art.mime_type};base64,${art.base64}`}
+                                  download={art.filename}
+                                  className="rounded-lg bg-gray-900 px-3 py-1 text-xs font-medium text-white hover:bg-black"
+                                >
+                                  Download File
+                                </a>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
 
                     {/* Final Answer Display */}
                     {turn.assistantMessage && (

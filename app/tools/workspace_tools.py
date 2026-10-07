@@ -6,13 +6,17 @@ and analyze visual assets using local vision LLMs.
 """
 
 import base64
+import io
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 from ollama import Client
-from pypdf import PdfReader
+from openai import RateLimitError
+
+from app.core.session_store import session_store
 
 # Add project root (nova-ai/) to Python path dynamically
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -84,36 +88,42 @@ def list_workspace_files(
 # Tool 2: Inspect CSV Schema & Head
 # ---------------------------------
 def inspect_csv_schema(
-        params: InspectCSVInput | None = None,
-        file_path : str = "",
-        sample_rows: int = 5
+    params: InspectCSVInput | None = None,
+    file_path: str = "",
+    sample_rows: int = 5,
+    session_id: str | None = None,
 ) -> dict[str, Any]:
-    """
-    Inspects a CSV file's structure, column types, shape, and sample data without loading the whole file into LLM memory.
-    """
     if params is None:
         params = InspectCSVInput(file_path=file_path, sample_rows=sample_rows)
     try:
-        safe_file_path = workspace.resolve_safe_path(params.file_path)
+        clean_filename = Path(params.file_path).name
+        raw_bytes = None
 
-        if not safe_file_path.exists():
-            return {"status": "error", "message": f"File '{params.file_path}' not found."}
+        if session_id:
+            raw_bytes = session_store.get_file(session_id, clean_filename)
 
-        if safe_file_path.suffix.lower() not in ['.csv', '.tsv']:
-            return {"status": "error", "message": f"File '{params.file_path}' is not a CSV/TSV file."}
-        
-        # Use pandas to quickly inspect the header and schema
-        sep = '\t' if safe_file_path.suffix.lower() == '.tsv' else ','
+        if not raw_bytes:
+            safe_file_path = workspace.resolve_safe_path(
+                params.file_path, session_id=session_id
+            )
+            if safe_file_path.exists() and safe_file_path.is_file():
+                raw_bytes = safe_file_path.read_bytes()
 
-        # Read sample rows
-        df_sample = pd.read_csv(safe_file_path, sep=sep, nrows=params.sample_rows)
+        if not raw_bytes:
+            return {
+                "status": "error",
+                "message": f"Dataset '{params.file_path}' not found in active session.",
+            }
 
-        # Get overall row count efficiently without reading everything into RAM
-        with open(safe_file_path, 'rb') as file:
-            total_lines = sum(1 for _ in file)
-        estimated_rows = max(0, total_lines - 1)  # Subtract 1 for header
+        sep = "\t" if clean_filename.lower().endswith(".tsv") else ","
+        df_sample = pd.read_csv(
+            io.BytesIO(raw_bytes), sep=sep, nrows=params.sample_rows
+        )
 
-        # Build schema summary
+        # Estimate rows from byte lines
+        total_lines = len(raw_bytes.splitlines())
+        estimated_rows = max(0, total_lines - 1)
+
         column_schema = [
             {"column": col, "dtype": str(df_sample[col].dtype)}
             for col in df_sample.columns
@@ -121,81 +131,89 @@ def inspect_csv_schema(
 
         return {
             "status": "success",
-            "file_name": safe_file_path.name,
+            "file_name": clean_filename,
             "total_rows_approx": estimated_rows,
             "total_columns": len(df_sample.columns),
             "columns": column_schema,
-            "sample_data": df_sample.to_dict(orient="records")
+            "sample_data": df_sample.to_dict(orient="records"),
         }
-
-    except PermissionError as pe:
-        return {"status": "error", "message": str(pe)}
     except Exception as e:  # noqa: BLE001
         return {"status": "error", "message": f"Failed to inspect CSV: {str(e)}"}  # noqa: RUF010
 
 
 # --------------------------
-# Tool 3: Inspect PDF Schema
+# Tool 3: Inspect PDF Schema (In-Memory Stream Aware)
 # --------------------------
 def inspect_pdf_schema(
-        params: InspectPDFInput | None = None,
-        file_path: str = "",
-        max_pages_to_sample: int = 2,
+    params: InspectPDFInput | None = None,
+    file_path: str = "",
+    max_pages_to_sample: int = 2,
+    session_id: str | None = None,
 ) -> dict[str, Any]:
     """
-    Inspects a PDF document in `./nova_workspace` to retrieve total page count,
-    metadata, and sample text from the initial pages.
+    Inspects a PDF document from active session memory (or disk fallback) to retrieve
+    total page count, metadata, and clean sample text from initial pages.
     """
-    # 1. Parameter Normalization (Handles both direct kwargs and Pydantic objects)
     if params is None:
         params = InspectPDFInput(
             file_path=file_path,
-            max_pages_to_sample=max_pages_to_sample
+            max_pages_to_sample=max_pages_to_sample,
+            session_id=session_id,
         )
 
     try:
-        # 2. Path Security Check
-        safe_file_path = workspace.resolve_safe_path(params.file_path)
-        if not safe_file_path.exists():
+        import fitz  # PyMuPDF: C-based, resilient to stream decompression & trailer damage
+
+        clean_filename = Path(params.file_path).name
+        raw_bytes: bytes | None = None
+        active_session = params.session_id or session_id
+
+        # 1. Check session_store for in-memory uploaded PDF
+        if active_session:
+            raw_bytes = session_store.get_file(active_session, clean_filename)
+
+        # 2. Disk fallback for static templates
+        if not raw_bytes:
+            safe_file_path = workspace.resolve_safe_path(
+                params.file_path, session_id=active_session
+            )
+            if not safe_file_path.exists():
+                safe_file_path = workspace.resolve_safe_path(
+                    params.file_path, session_id=None
+                )
+            if safe_file_path.exists() and safe_file_path.is_file():
+                raw_bytes = safe_file_path.read_bytes()
+
+        if not raw_bytes:
             return {
                 "status": "error",
-                "message": f"File '{params.file_path}' not found in workspace.",
-            }
-        if safe_file_path.suffix.lower() != '.pdf':
-            return {
-                "status": "error",
-                "message": f"File '{params.file_path}' is not a valid PDF file."
+                "message": f"PDF document '{params.file_path}' was not found in active session memory.",
             }
 
-        # 3. Read PDF with pypdf.PdfReader
-        reader = PdfReader(safe_file_path)
-        total_pages = len(reader.pages)
+        # 3. Parse in-memory stream with fitz
+        doc = fitz.open(stream=raw_bytes, filetype="pdf")
+        total_pages = len(doc)
 
-        # Extract basic metadata
-        meta = reader.metadata
-        metadata_summary = {}
-        if meta:
-            metadata_summary = {
-                "title": meta.title or "Unknown",
-                "author": meta.author or "Unknown",
-                "creator": meta.creator or "Unknown",
-            }
+        metadata_raw = doc.metadata or {}
+        metadata_summary = {
+            "title": metadata_raw.get("title") or clean_filename,
+            "author": metadata_raw.get("author") or "Unknown",
+            "creator": metadata_raw.get("creator") or "Unknown",
+        }
 
-        # Extract sample text from initial pages
+        # 4. Extract text sample from initial pages
         pages_to_extract = min(total_pages, params.max_pages_to_sample)
         sample_pages = []
-        for page_num in range(pages_to_extract):
-            page = reader.pages[page_num]
-            extracted_text = page.extract_text() or "[No readable text found.]"
 
-            # Clean up excessive whitespace for scannability
+        for page_num in range(pages_to_extract):
+            page = doc[page_num]
+            extracted_text = str(page.get_text("text") or "").strip()
             cleaned_text = " ".join(extracted_text.split())
 
-            # Limit sample snippet length per page
             snippet = (
-                cleaned_text[:400] + '...'
+                cleaned_text[:400] + "..."
                 if len(cleaned_text) > 400
-                else cleaned_text
+                else cleaned_text or "[No readable text found on page]"
             )
 
             sample_pages.append(
@@ -206,95 +224,137 @@ def inspect_pdf_schema(
                 }
             )
 
+        doc.close()
+
         return {
             "status": "success",
-            "file_name": safe_file_path.name,
+            "file_name": clean_filename,
             "total_pages": total_pages,
             "metadata": metadata_summary,
             "sample_pages": sample_pages,
         }
-    
+
     except Exception as e:  # noqa: BLE001
         return {
             "status": "error",
-            "message": f"Failed to inspect pdf '{params.file_path}': {str(e)}"  # noqa: RUF010
+            "message": f"Failed to inspect PDF '{params.file_path}': {str(e)}",  # noqa: RUF010
         }
 
 
 # --------------------------
-# Tool 4: Inspect Image / Chart
+# Tool 4: Inspect Image / Chart (In-Memory Base64 Aware)
 # --------------------------
 def inspect_image(
     params: InspectImageInput | None = None,
-    file_path: str = "",
+    file_path: str = "chart.png",
     prompt: str = "Describe this image in detail.",
+    base64_image: str | None = None,
     session_id: str | None = None,
 ) -> dict[str, str]:
     if params is None:
-        params = InspectImageInput(file_path=file_path, prompt=prompt)
+        params = InspectImageInput(
+            file_path=file_path,
+            prompt=prompt,
+            base64_image=base64_image,
+            session_id=session_id,
+        )
 
     try:
-        # Check session directory first, then default directory
-        safe_file_path = workspace.resolve_safe_path(
-            params.file_path, session_id=session_id
-        )
-        if not safe_file_path.exists():
+        raw_b64: str | None = params.base64_image
+        target_name = Path(params.file_path).name
+
+        # 1. Resolve image from in-memory session store
+        if not raw_b64 and session_id:
+            visuals = session_store.get_latest_visuals(session_id)
+            # Find matching visual by filename or pick the latest generated visual
+            for v in reversed(visuals):
+                if v.get("name") == target_name or target_name in [
+                    "chart.png",
+                    "image.png",
+                ]:
+                    raw_b64 = v.get("b64")
+                    target_name = v.get("name", target_name)
+                    break
+
+            # If not in visuals, check uploaded raw files in session_store
+            if not raw_b64:
+                file_bytes = session_store.get_file(session_id, target_name)
+                if file_bytes:
+                    raw_b64 = base64.b64encode(file_bytes).decode("utf-8")
+
+        # 2. Optional disk fallback for static/legacy template assets
+        if not raw_b64:
             safe_file_path = workspace.resolve_safe_path(
-                params.file_path, session_id=None
+                params.file_path, session_id=session_id
             )
+            if not safe_file_path.exists():
+                safe_file_path = workspace.resolve_safe_path(
+                    params.file_path, session_id=None
+                )
 
-        if not safe_file_path.exists():
+            if safe_file_path.exists() and safe_file_path.is_file():
+                with open(safe_file_path, "rb") as img_file:
+                    raw_b64 = base64.b64encode(img_file.read()).decode("utf-8").strip()
+
+        if not raw_b64:
             return {
                 "status": "error",
-                "message": f"File '{params.file_path}' does not exist.",
+                "message": f"Image artifact '{params.file_path}' was not found in active session memory.",
             }
 
-        supported_exts = {".png", ".jpg", ".jpeg", ".webp"}
-        if safe_file_path.suffix.lower() not in supported_exts:
-            return {
-                "status": "error",
-                "message": f"File '{params.file_path}' is not a supported image format.",
-            }
+        # Normalize data URL stripping if already prefixed
+        if raw_b64.startswith("data:"):
+            raw_b64 = raw_b64.split(",", 1)[-1].strip()
 
-        with open(safe_file_path, "rb") as img_file:
-            base64_image = base64.b64encode(img_file.read()).decode("utf-8").strip()
+        ext = Path(target_name).suffix.lower().lstrip(".")
+        mime_type = "image/jpeg" if ext in ["jpg", "jpeg"] else f"image/{ext or 'png'}"
 
+        # 3. Vision Inference (Cloud Groq vs. Local Ollama)
         if USE_CLOUD_LLM:
             from openai import OpenAI
 
-            ext = safe_file_path.suffix.lower().lstrip(".")
-            mime_type = "image/jpeg" if ext in ["jpg", "jpeg"] else f"image/{ext}"
+            cloud_client = OpenAI(
+                api_key=GROQ_API_KEY, base_url=CLOUD_BASE_URL, timeout=30.0
+            )
+            max_retries = 3
+            visual_analysis = "No visual description generated."
 
-            cloud_client = OpenAI(api_key=GROQ_API_KEY, base_url=CLOUD_BASE_URL)
-            response = cloud_client.chat.completions.create(
-                model=CLOUD_VISION_MODEL,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": params.prompt},
+            for attempt in range(max_retries):
+                try:
+                    response = cloud_client.chat.completions.create(
+                        model=CLOUD_VISION_MODEL,
+                        messages=[
                             {
-                                "type": "image_url",
-                                "image_url": {
-                                    "url": f"data:{mime_type};base64,{base64_image}"
-                                },
-                            },
+                                "role": "user",
+                                "content": [
+                                    {"type": "text", "text": params.prompt},
+                                    {
+                                        "type": "image_url",
+                                        "image_url": {
+                                            "url": f"data:{mime_type};base64,{raw_b64}"
+                                        },
+                                    },
+                                ],
+                            }
                         ],
-                    }
-                ],
-                max_tokens=600,
-                temperature=0.1,
-            )
-            visual_analysis = (
-                response.choices[0].message.content
-                or "No visual description generated."
-            )
+                        max_tokens=600,
+                        temperature=0.1,
+                    )
+                    visual_analysis = (
+                        response.choices[0].message.content
+                        or "No visual description generated."
+                    )
+                    break
+                except RateLimitError:
+                    if attempt == max_retries - 1:
+                        raise
+                    time.sleep(2.0 * (attempt + 1))
         else:
             client = Client(host=OLLAMA_HOST)
             response = client.chat(
                 model=VISION_MODEL_NAME,
                 messages=[
-                    {"role": "user", "content": params.prompt, "images": [base64_image]}
+                    {"role": "user", "content": params.prompt, "images": [raw_b64]}
                 ],
                 options={"temperature": 0.1},
                 keep_alive="5m",
@@ -305,10 +365,11 @@ def inspect_image(
 
         return {
             "status": "success",
-            "file_name": safe_file_path.name,
+            "file_name": target_name,
             "prompt_asked": params.prompt,
             "visual_analysis": visual_analysis,
         }
+
     except Exception as e:  # noqa: BLE001
         return {"status": "error", "message": f"Failed to inspect image: {str(e)}"}  # noqa: RUF010
 
