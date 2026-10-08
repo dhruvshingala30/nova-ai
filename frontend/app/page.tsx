@@ -41,6 +41,23 @@ type ConversationMessage = {
   content: string;
 };
 
+// ---------------------------------------------------------------------------
+// DEVICE / CLIENT IDENTITY HELPER (NEW)
+// ---------------------------------------------------------------------------
+export function getOrCreateClientId(): string {
+  if (typeof window === "undefined") return "server";
+
+  const STORAGE_KEY = "nova_client_id";
+  let clientId = localStorage.getItem(STORAGE_KEY);
+
+  if (!clientId) {
+    clientId = "user_" + crypto.randomUUID();
+    localStorage.setItem(STORAGE_KEY, clientId);
+  }
+
+  return clientId;
+}
+
 function formatActivityEvent(event: NovaEvent) {
   switch (event.event_type) {
     case "session_updated":
@@ -406,14 +423,18 @@ export default function Home() {
 
   const loadSessions = async () => {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/conversations`);
+      const clientId = getOrCreateClientId();
+      const response = await fetch(`${API_BASE_URL}/api/conversations`, {
+        headers: {
+          "x-user-id": clientId,
+        },
+      });
 
       if (!response.ok) {
         throw new Error(`Failed to load conversations: ${response.status}`);
       }
 
       const data: ChatSession[] = await response.json();
-
       setSessions(data);
     } catch (error) {
       console.error("Failed to load conversations:", error);
@@ -628,11 +649,14 @@ export default function Home() {
     const currentSessionId = sessionId ?? crypto.randomUUID();
 
     try {
+      const clientId = getOrCreateClientId();
+
       // Start Nova
       const response = await fetch(`${API_BASE_URL}/api/chat`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "x-user-id": clientId, // <-- ADDED HERE
         },
         body: JSON.stringify({
           message: submittedMessage,
@@ -845,7 +869,7 @@ export default function Home() {
       // Remove the unfinished turn if the request itself failed
       setChatTurns((previous) => previous.filter((turn) => turn.id !== turnId));
     }
-  };
+  };;
 
   return (
     <main className="flex h-screen w-screen overflow-hidden bg-white text-gray-900">

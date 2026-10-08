@@ -48,10 +48,15 @@ class SQLiteMemory:
                 session_id TEXT PRIMARY KEY,
                 title TEXT NOT NULL,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                user_id TEXT DEFAULT 'default_user'
                 )
                 """
             )
+            cursor.execute("PRAGMA table_info(sessions)")
+            columns = [col[1] for col in cursor.fetchall()]
+            if "user_id" not in columns:
+                cursor.execute("ALTER TABLE sessions ADD COLUMN user_id TEXT DEFAULT 'default_user'")
             conn.commit()
 
     def save_message(self, session_id: str, role: str, content: str):
@@ -64,18 +69,18 @@ class SQLiteMemory:
             )
             conn.commit()
 
-    def save_session(self, session_id: str, title: str):
+    def save_session(self, session_id: str, title: str, user_id: str = "default_user"):
         """Creates a session or updates its timestamp."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
 
             cursor.execute(
                 """
-                INSERT INTO sessions (session_id, title) VALUES (?, ?) 
+                INSERT INTO sessions (session_id, title, user_id) VALUES (?, ?, ?) 
                 ON CONFLICT(session_id) 
                 DO UPDATE SET updated_at = CURRENT_TIMESTAMP
                 """,
-                (session_id, title),
+                (session_id, title, user_id),
             )
             conn.commit()
 
@@ -100,18 +105,28 @@ class SQLiteMemory:
             rows = cursor.fetchall()
             return [{"role": row[0], "content": row[1]} for row in rows]
 
-    def list_sessions(self) -> list[dict[str, Any]]:
+    def list_sessions(self, user_id: str | None = None) -> list[dict[str, Any]]:
         """Returns all sessions with their human-readable titles."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
 
-            cursor.execute(
-                """SELECT session_id, title, created_at, updated_at 
-                FROM sessions 
-                WHERE TRIM(session_id) != ''
-                AND TRIM(title) != ''
-                ORDER BY updated_at DESC"""
-            )
+            if user_id:
+                cursor.execute(
+                    """SELECT session_id, title, created_at, updated_at 
+                    FROM sessions 
+                    WHERE user_id = ?
+                    AND TRIM(title) != ''
+                    ORDER BY updated_at DESC
+                    """, (user_id,),
+                )
+            else:
+                cursor.execute(
+                    """SELECT session_id, title, created_at, updated_at 
+                    FROM sessions 
+                    WHERE TRIM(session_id) != ''
+                    AND TRIM(title) != ''
+                    ORDER BY updated_at DESC"""
+                )
 
             rows = cursor.fetchall()
             return [

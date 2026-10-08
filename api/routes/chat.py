@@ -9,7 +9,7 @@ import json
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Header
 from fastapi.responses import StreamingResponse
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -17,6 +17,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 from api.core.hitl_manager import hitl_manager
 from api.core.session_events import session_event_manager
 from api.schemas.chat import ChatRequest
+from api.services.conversation_service import conversation_service
 from api.services.nova_services import NovaService
 from app.core.event_bus import EventCollector
 
@@ -27,11 +28,19 @@ router = APIRouter()
 # POST /chat - Dispatch Agent Query in Background
 # ---------------------------------------------------------------------------
 @router.post("/chat")
-async def chat(request: ChatRequest):
+async def chat(request: ChatRequest, x_user_id: str | None = Header(default="default_user")):
     """Receives a user message, sets up an event collection queue,
     and runs the orchestrator asynchronously in the background.
     """
     session_id = request.session_id or str(uuid.uuid4())
+    effective_user_id = x_user_id or "default_user"
+
+    # Pre-register session ownership in SQLite so this device owns the conversation
+    conversation_service.create_or_claim_session(
+        session_id=session_id,
+        title=request.message[:40].strip(),
+        user_id=effective_user_id
+    )
 
     # Create an event queue so the frontend can read real-time events via SSE
     queue = session_event_manager.create_queue(

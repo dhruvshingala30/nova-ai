@@ -6,7 +6,7 @@ message logs from persistent memory.
 
 from pathlib import Path
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Header
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -20,9 +20,9 @@ router = APIRouter()
 # GET /conversations - List All Saved Chat Sessions
 # ---------------------------------------------------------------------------
 @router.get("/conversations", response_model=list[Conversation])
-def list_conversations() -> list[Conversation]:
+def list_conversations(x_user_id: str | None = Header(default=None)) -> list[Conversation]:
     """Endpoint to list all conversations from persistent storage for sidebar display."""
-    return conversation_service.list_conversations() # type: ignore
+    return conversation_service.list_conversations(x_user_id=x_user_id) # type: ignore
 
 # ---------------------------------------------------------------------------
 # GET /conversations/{session_id} - Fetch Messages for Specific Session

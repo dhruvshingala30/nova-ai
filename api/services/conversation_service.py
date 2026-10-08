@@ -19,9 +19,15 @@ class ConversationService:
         # Establish connection/interface to SQLite storage
         self.memory = SQLiteMemory()
 
-    def list_conversations(self) -> list[dict[str, Any]]:
+    def create_or_claim_session(
+        self, session_id: str, title: str, user_id: str = "default_user"
+    ) -> None:
+        """Ensures a session row exists and links it to the requesting device's user_id."""
+        self.memory.save_session(session_id=session_id, title=title, user_id=user_id)
+
+    def list_conversations(self, x_user_id: str | None) -> list[dict[str, Any]]:
         """Retrieves all conversation metadata records from database memory."""
-        return self.memory.list_sessions()
+        return self.memory.list_sessions(user_id=x_user_id)
 
     def get_conversation(self, session_id: str) -> list[dict[str, str]]:
         """Retrieves full message turn history (user & assistant) for a session ID."""
