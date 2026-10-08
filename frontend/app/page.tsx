@@ -392,6 +392,7 @@ export default function Home() {
   const [isRunning, setIsRunning] = useState(false);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<ChatSession[]>([]);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const [pendingApproval, setPendingApproval] = useState<{
     turnId: string;
@@ -848,21 +849,47 @@ export default function Home() {
 
   return (
     <main className="flex h-screen w-screen overflow-hidden bg-white text-gray-900">
-      {/* 1. INDEPENDENT SIDEBAR */}
-      <aside className="flex h-full w-64 shrink-0 flex-col border-r bg-gray-50">
+      {/* MOBILE BACKDROP OVERLAY */}
+      {isSidebarOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/40 backdrop-blur-sm md:hidden"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+
+      {/* 1. RESPONSIVE SIDEBAR */}
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 flex h-full w-72 shrink-0 flex-col border-r bg-gray-50 transition-transform duration-300 ease-in-out md:static md:w-64 md:translate-x-0 ${
+          isSidebarOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full"
+        }`}
+      >
         {/* Sidebar header */}
-        <div className="border-b px-5 py-4">
-          <h1 className="text-lg font-semibold tracking-tight text-gray-900">
-            Nova
-          </h1>
-          <p className="text-xs text-gray-500">Multi-Agent AI Assistant</p>
+        <div className="flex items-center justify-between border-b px-5 py-4">
+          <div>
+            <h1 className="text-lg font-semibold tracking-tight text-gray-900">
+              Nova
+            </h1>
+            <p className="text-xs text-gray-500">Multi-Agent AI Assistant</p>
+          </div>
+          {/* Close button for mobile */}
+          <button
+            type="button"
+            onClick={() => setIsSidebarOpen(false)}
+            className="rounded-lg p-1.5 text-base font-bold text-gray-400 hover:bg-gray-200/60 hover:text-gray-700 md:hidden"
+            aria-label="Close sidebar"
+          >
+            ✕
+          </button>
         </div>
 
         {/* New Chat Button */}
         <div className="p-3">
           <button
             type="button"
-            onClick={handleNewChat}
+            onClick={() => {
+              handleNewChat();
+              setIsSidebarOpen(false); // auto-close drawer on mobile
+            }}
             disabled={isRunning}
             className="flex w-full items-center gap-2 rounded-xl border border-gray-200 bg-white px-4 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -882,7 +909,10 @@ export default function Home() {
               <button
                 key={session.session_id}
                 type="button"
-                onClick={() => loadConversation(session.session_id)}
+                onClick={() => {
+                  loadConversation(session.session_id);
+                  setIsSidebarOpen(false); // auto-close drawer on mobile
+                }}
                 disabled={isRunning}
                 className={`w-full truncate rounded-lg px-3 py-2 text-left text-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${
                   session.session_id === sessionId
@@ -983,6 +1013,39 @@ export default function Home() {
 
       {/* 2. INDEPENDENT MAIN CHAT WORKSPACE */}
       <section className="relative flex h-full flex-1 flex-col overflow-hidden bg-white">
+        {/* MOBILE TOP BAR WITH HAMBURGER BUTTON (NEW) */}
+        <div className="flex items-center justify-between border-b px-4 py-3 md:hidden">
+          <button
+            type="button"
+            onClick={() => setIsSidebarOpen(true)}
+            className="rounded-lg p-2 text-gray-600 hover:bg-gray-100"
+            aria-label="Open menu"
+          >
+            <svg
+              className="h-6 w-6"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M4 6h16M4 12h16M4 18h16"
+              />
+            </svg>
+          </button>
+          <span className="text-sm font-semibold text-gray-800">Nova</span>
+          <button
+            type="button"
+            onClick={handleNewChat}
+            disabled={isRunning}
+            className="rounded-lg p-2 text-xs font-medium text-gray-600 hover:bg-gray-100"
+          >
+            + New
+          </button>
+        </div>
+
         {chatTurns.length === 0 ? (
           /* ========================================================= */
           /* EMPTY STATE: CENTERED INPUT & GEMINI / CHATGPT TAGLINE   */
@@ -1083,7 +1146,7 @@ export default function Home() {
                             </p>
                           </div>
                           <span className="text-base text-gray-400">
-                            {turn.activityExpanded ? "⌃" : "⌄"}
+                            {turn.activityExpanded ? "▲" : "▼"}
                           </span>
                         </button>
 
@@ -1307,7 +1370,7 @@ export default function Home() {
                             ) : (
                               <div className="flex items-center justify-between">
                                 <span className="text-xs font-medium text-gray-800">
-                                  📊 {art.filename}
+                                  📄 {art.filename}
                                 </span>
                                 <a
                                   href={`data:${art.mime_type};base64,${art.base64}`}
