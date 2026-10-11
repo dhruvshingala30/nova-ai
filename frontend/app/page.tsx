@@ -1029,7 +1029,7 @@ export default function Home() {
               <p className="truncate text-xs font-medium text-gray-800">
                 Nova Workspace
               </p>
-              <p className="text-[10px] text-gray-400">Local Multi-Agent</p>
+              <p className="text-[10px] text-gray-400">Multi-Agent Mode</p>
             </div>
           </div>
         </div>

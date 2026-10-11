@@ -119,7 +119,7 @@ class BaseSpecialistAgent:
     def _build_system_prompt(self) -> str:
         """Constructs the specialist's strict system prompt using SPECIALIST_PROMPT."""
         tools_text = self._generate_tools_prompt()
-        current_time = datetime.now().strftime("%A, %B %d, %Y at %I:%M:%S %p")  # noqa: DTZ005
+        current_time = datetime.now().strftime("%A, %B %d, %Y at %I:%M:%S %p")
         docs_context = self._get_indexed_document_context()
 
         return SPECIALIST_PROMPT.format(

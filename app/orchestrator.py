@@ -100,7 +100,7 @@ class MultiAgentOrchestrator:
 
     def _build_supervisor_prompt(self) -> str:
         """Keeps static prompt first for 100% KV-cache hit rate."""
-        current_date = datetime.now().strftime("%A, %B %d, %Y")  # noqa: DTZ005
+        current_date = datetime.now().strftime("%A, %B %d, %Y")
 
         indexed_docs = get_indexed_documents()
         docs_list_str = "\n".join([f"  - {doc}" for doc in indexed_docs])
