@@ -5,9 +5,8 @@ Initializes the MultiAgentOrchestrator and manages the REPL loop
 with background workspace monitoring.
 """
 
-from config import EXIT_COMMANDS
+from config import EXIT_COMMANDS, WORKSPACE_DIR
 from core.event import NovaEvent
-from core.workspace_manager import workspace
 from core.workspace_watcher import start_workspace_watcher
 from orchestrator import MultiAgentOrchestrator
 from utils import goodbye, print_separator, print_step, welcome
@@ -86,7 +85,7 @@ def main():
     print_separator()
 
     # Start the workspace watcher for automatic PDF/CSV ingestion
-    watcher_observer = start_workspace_watcher(str(workspace.workspace_dir))
+    watcher_observer = start_workspace_watcher(str(WORKSPACE_DIR))
     print_separator()
  
     while True:

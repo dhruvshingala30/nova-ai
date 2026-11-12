@@ -1,6 +1,7 @@
 """
-app/tools/knowledge_base_search.py - Hybrid Retrieval Engine (Dense + BM25 + RRF).
-Combines ChromaDB vector similarity with BM25 keyword matching for optimal recall.
+app/tools/knowledge_base_search.py - Hybrid Retrieval Engine (Dense + BM25 + RRF + Reranker).
+Combines ChromaDB vector similarity with BM25 keyword matching for optimal recall,
+then applies a Cross-Encoder reranker for precision.
 """
 
 import os
@@ -14,7 +15,10 @@ from pathlib import Path
 import chromadb
 from chromadb.utils import embedding_functions
 from rank_bm25 import (
-    BM25Okapi,  # Gold Standard algorithm used by modern search engines for keywords matchin(sparse retrival)
+    BM25Okapi,  # Gold Standard algorithm used by modern search engines for keywords matching(sparse retrival)
+)
+from sentence_transformers import (
+    CrossEncoder,  # Cross-Encoder reranker for precise query-document relevance scoring
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -26,6 +30,7 @@ from app.core.hyde import hyde_generator
 VECTOR_DB_DIR = str((PROJECT_ROOT / "data" / "vector_db").resolve())
 COLLECTION_NAME = "nova_workspace_docs"
 EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
 # -------------------------------------------------------------
 # Module-level Singleton Cache to avoid re-instantiation overhead
@@ -33,6 +38,7 @@ EMBEDDING_MODEL = "all-MiniLM-L6-v2"
 _CHROMA_CLIENT = None
 _EMBEDDING_FN = None
 _COLLECTION = None
+_RERANKER = None
 
 
 def _get_collection():
@@ -97,6 +103,47 @@ def rrf_score(
     return fused_results
 
 
+def _get_reranker() -> CrossEncoder:
+    """
+    Initializes and caches the Cross-Encoder reranker model once in memory.
+    Uses ms-marco-MiniLM-L-6-v2 (22M params) — optimized for passage relevance scoring.
+    """
+    global _RERANKER
+    if _RERANKER is None:
+        _RERANKER = CrossEncoder(RERANKER_MODEL)
+    return _RERANKER
+
+
+def rerank(query: str, candidates: list[dict], top_n: int) -> list[dict]:
+    """
+    Reranks RRF-fused candidates using a Cross-Encoder for precise semantic relevance.
+    Scores each (query, document_text) pair independently and sorts by relevance.
+
+    Args:
+        query: The original user query (NOT the HyDE passage).
+        candidates: RRF-fused result dicts, each containing a 'text' field.
+        top_n: Number of top results to return after reranking.
+
+    Returns:
+        Top-n candidates sorted by cross-encoder relevance score (descending).
+    """
+    if not candidates:
+        return candidates
+
+    cross_encoder = _get_reranker()
+
+    # Build (query, document) pairs for cross-encoder scoring
+    pairs = [(query, item["text"]) for item in candidates]
+    ce_scores = cross_encoder.predict(pairs)
+
+    # Attach cross-encoder scores and sort descending
+    for item, score in zip(candidates, ce_scores):
+        item["rerank_score"] = round(float(score), 4)
+
+    reranked = sorted(candidates, key=lambda x: x["rerank_score"], reverse=True)
+    return reranked[:top_n]
+
+
 def get_indexed_documents() -> list[str]:
     """
     Dynamically fetches all unique document sources currently indexed in ChromaDB.
@@ -125,7 +172,7 @@ def get_indexed_documents() -> list[str]:
         return []
     
 
-def search_knowledge_base(query: str, n_results: int = 3) -> dict:
+def search_knowledge_base(query: str, n_results: int = 10) -> dict:
     """
     Hybrid semantic search combining Dense Embeddings (ChromaDB) and Sparse Keywords (BM25).
     """
@@ -211,7 +258,13 @@ def search_knowledge_base(query: str, n_results: int = 3) -> dict:
         # 3. RECIPROCAL RANK FUSION (RRF)
         # ---------------------------------------------------------
         fused = rrf_score(dense_candidates, bm25_candidates, k=60)
-        final_results = fused[:n_results]
+
+        # ---------------------------------------------------------
+        # 4. CROSS-ENCODER RERANKING (Precision pass)
+        # ---------------------------------------------------------
+        # Rerank the full fused candidate pool using the original query
+        # (not the HyDE passage) for true semantic relevance scoring
+        final_results = rerank(query, fused, top_n=n_results)
 
         if not final_results:
             return {
