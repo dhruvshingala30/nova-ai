@@ -13,7 +13,14 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from app.config import MODEL_NAME, OLLAMA_HOST
+from app.config import (
+    CLOUD_BASE_URL,
+    CLOUD_MODEL_NAME,
+    GROQ_API_KEY,
+    MODEL_NAME,
+    OLLAMA_HOST,
+    USE_CLOUD_LLM,
+)
 from app.prompts import DEFAULT_HYDE_PROMPT
 
 logger = logging.getLogger(__name__)
@@ -25,8 +32,6 @@ class HyDEGenerator:
     """
     def __init__(
             self,
-            host: str = OLLAMA_HOST,
-            model_name: str = MODEL_NAME,
             prompt_template: str = DEFAULT_HYDE_PROMPT,
             temperature: float = 0.2,
     ) -> None:
@@ -37,8 +42,20 @@ class HyDEGenerator:
             prompt_template: Formatting prompt with '{query}' placeholder.
             temperature: Low temperature (0.1 - 0.3) for focused factual phrasing.
         """
-        self.client = Client(host=host)
-        self.model_name = model_name
+        if USE_CLOUD_LLM:
+            from openai import OpenAI
+            self.client = OpenAI(
+                api_key=GROQ_API_KEY,
+                base_url=CLOUD_BASE_URL,
+                timeout=30,
+            )
+            self.model = CLOUD_MODEL_NAME
+        else:
+            self.client = Client(host=OLLAMA_HOST)
+            self.model = MODEL_NAME
+            self.prompt_template = prompt_template
+            self.temperature = temperature
+
         self.prompt_template = prompt_template
         self.temperature = temperature
 
@@ -62,22 +79,40 @@ class HyDEGenerator:
         formatted_prompt = self.prompt_template.format(query=query)
 
         try:
-            response = self.client.chat(
-                model=self.model_name,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": formatted_prompt,
-                    }
-                ],
-                options={
-                    "temperature": self.temperature,
-                    "num_predict": 180,
-                },
-            )
+            if USE_CLOUD_LLM:
+                response = self.client.chat.completions.create( # type: ignore
+                    model=self.model,
+                    response_format={"type": "json_object"},
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": formatted_prompt,
+                        }
+                    ],
+                    temperature=self.temperature,
+                )
+                hypothetical_doc = response.choices[0].message.content or "{}"
+                cleaned_doc = hypothetical_doc.strip()
+                
+            else: 
+                response = self.client.chat(
+                    model=self.model,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": formatted_prompt,
+                        }
+                    ],
+                    options={
+                        "temperature": self.temperature,
+                        "num_predict": 180,
+                    },
+                ) # type: ignore
 
-            hypothetical_doc = response.message.content or ""
-            cleaned_doc = hypothetical_doc.strip()
+                hypothetical_doc = response.message.content or ""
+                cleaned_doc = hypothetical_doc.strip()
+
+                print("[HyDe] Generated synthetic passage for query")
 
             if cleaned_doc:
                 return cleaned_doc
